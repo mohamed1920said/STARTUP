@@ -1,0 +1,9 @@
+.pio/
+.pioenvs/
+.piolib/
+.piotest/
+__pycache__/
+*.swp
+*.swo
+.DS_Store
+build/

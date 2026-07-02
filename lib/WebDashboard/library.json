@@ -1,0 +1,13 @@
+{
+    "name": "WebDashboard",
+    "version": "1.0.0",
+    "description": "ESP32-S3 real-time web dashboard with WebSocket and OTA for LoRa gateway",
+    "keywords": ["dashboard", "websocket", "ota", "esp32"],
+    "authors": [{"name": "LoRa Node Project"}],
+    "frameworks": ["arduino"],
+    "platforms": ["espressif32"],
+    "dependencies": {
+        "mathieucarbou/ESP Async WebServer": "^3.0.0",
+        "bblanchon/ArduinoJson": "^7.0.0"
+    }
+}

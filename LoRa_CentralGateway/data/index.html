@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LoRa Network Dashboard</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<nav>
+  <h1>LoRa Network Control</h1>
+  <span id="health-status">Connecting...</span>
+</nav>
+<main>
+  <section id="weather">
+    <h2>Weather Station</h2>
+    <div class="grid-3">
+      <div class="card"><label>Rain</label><span id="rain">--</span><small>mm</small></div>
+      <div class="card"><label>Wind</label><span id="wind">--</span><small>m/s</small></div>
+      <div class="card"><label>Dir</label><span id="wind-dir">--</span><small>°</small></div>
+    </div>
+  </section>
+
+  <section id="sensors">
+    <h2>Sensor Nodes</h2>
+    <table id="sensor-table">
+      <thead><tr><th>Node</th><th>Moisture</th><th>Temp</th><th>Battery</th><th>Seq</th><th>RSSI</th></tr></thead>
+      <tbody id="sensor-tbody"></tbody>
+    </table>
+  </section>
+
+  <section id="actuators">
+    <h2>Actuator Nodes</h2>
+    <div id="actuator-cards"></div>
+  </section>
+
+  <section id="ota">
+    <h2>Firmware Update (OTA)</h2>
+    <form id="ota-form" enctype="multipart/form-data">
+      <input type="file" name="firmware" accept=".bin">
+      <button type="submit">Upload & Update</button>
+    </form>
+    <div id="ota-progress"></div>
+  </section>
+
+  <section id="log">
+    <h2>Event Log</h2>
+    <pre id="log-output"></pre>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

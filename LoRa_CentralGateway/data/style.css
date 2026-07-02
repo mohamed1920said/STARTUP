@@ -1,0 +1,29 @@
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0b0e14;color:#e0e4ec}
+nav{background:#151a24;padding:1rem 2rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2a3240}
+nav h1{font-size:1.25rem;color:#6c8cff}
+#health-status{font-size:0.85rem;color:#8a94a6}
+main{max-width:1200px;margin:0 auto;padding:2rem}
+section{margin-bottom:2.5rem}
+section h2{font-size:1rem;color:#8a94a6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:1rem;border-left:3px solid #6c8cff;padding-left:.25rem}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+.card{background:#151a24;border:1px solid #2a3240;border-radius:8px;padding:1.25rem;text-align:center}
+.card label{display:block;font-size:.75rem;color:#6a7486;margin-bottom:.5rem;text-transform:uppercase}
+.card span{font-size:1.75rem;font-weight:700}
+.card small{font-size:.8rem;color:#6a7486;margin-left:.25rem}
+table{width:100%;border-collapse:collapse;background:#151a24;border-radius:8px;overflow:hidden}
+th{background:#1a212e;padding:.75rem 1rem;text-align:left;font-size:.75rem;color:#6a7486;text-transform:uppercase}
+td{padding:.75rem 1rem;border-top:1px solid #2a3240;font-size:.9rem}
+#actuator-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem}
+.actuator-card{background:#151a24;border:1px solid #2a3240;border-radius:8px;padding:1.25rem}
+.actuator-card h3{font-size:1rem;margin-bottom:.75rem}
+.actuator-card .state{font-size:1.25rem;font-weight:600;margin-bottom:1rem}
+.toggle-btn{background:#2a3240;border:none;color:#e0e4ec;padding:.6rem 1.5rem;border-radius:6px;cursor:pointer;font-size:.9rem}
+.toggle-btn:hover{background:#3a455a}
+.toggle-btn.on{background:#2d6b3f}
+.toggle-btn.off{background:#6b2d2d}
+#ota-form{display:flex;gap:1rem;align-items:center;margin-bottom:1rem}
+#ota-form input[type=file]{background:#151a24;border:1px solid #2a3240;padding:.5rem 1rem;border-radius:6px;color:#e0e4ec}
+#ota-form button{background:#6c8cff;border:none;color:#0b0e14;padding:.5rem 1.5rem;border-radius:6px;cursor:pointer;font-weight:600}
+#log-output{background:#0a0d12;padding:1rem;border-radius:8px;font-size:.8rem;max-height:200px;overflow-y:auto;color:#6a9f6a;line-height:1.5}
+@media(max-width:640px){.grid-3{grid-template-columns:1fr}}
