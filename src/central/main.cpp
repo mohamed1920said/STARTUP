@@ -110,7 +110,7 @@ void loop() {
 
 void processLoRa() {
     uint8_t buf[LORA_MAX_PAYLOAD];
-    int state = radio.receive(buf, sizeof(buf), 250);
+    int state = radio.receive(buf, sizeof(buf));
     if (state != RADIOLIB_ERR_NONE) return;
     uint16_t len = radio.getPacketLength();
     Serial.printf("[GW] Raw pkt: len=%u\n", len);
