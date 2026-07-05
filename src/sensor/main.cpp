@@ -21,7 +21,9 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature ds18b20(&oneWire);
 
 const uint8_t BATT_PIN = 35;
-const uint32_t TX_INTERVAL_MS = 30000;
+const int MOISTURE_DRY = 2500;
+const int MOISTURE_WET = 400;
+const uint32_t TX_INTERVAL_MS = 5000;
 uint32_t lastTxMs = 0;
 uint32_t seqCounter = 0;
 
@@ -52,6 +54,8 @@ bool sendTelemetry() {
     SensorTelemetry payload;
     payload.sequence      = seqCounter;
     payload.moisture_raw  = moistADC;
+    int pct = map(moistADC, MOISTURE_DRY, MOISTURE_WET, 0, 100);
+    payload.moisture_pct = (uint8_t)constrain(pct, 0, 100);
     payload.temperature_c = (int16_t)(tempC * 100);
     payload.battery_mv    = (uint16_t)(battV * 1000);
     payload.error_flags   = err;

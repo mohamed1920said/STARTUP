@@ -164,7 +164,7 @@ void onDecryptedPkt(uint16_t nodeId, PacketType type,
         case PacketType::SENSOR_TELEMETRY: {
             if (len < sizeof(SensorTelemetry)) break;
             auto* st = (const SensorTelemetry*)pt;
-            float mp = (st->moisture_raw / 4095.0f) * 100.0f;
+            float mp = st->moisture_pct;
             float tc = st->temperature_c / 100.0f;
             float bv = st->battery_mv / 1000.0f;
 

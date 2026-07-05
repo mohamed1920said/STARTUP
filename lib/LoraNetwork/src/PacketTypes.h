@@ -39,6 +39,7 @@ struct LoraFrame {
 struct SensorTelemetry {
     uint32_t sequence;
     uint16_t moisture_raw;
+    uint8_t  moisture_pct;
     int16_t  temperature_c;
     uint16_t battery_mv;
     uint8_t  error_flags;
