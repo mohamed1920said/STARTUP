@@ -21,15 +21,15 @@ const float    LORA_FREQ  = 868.0f;
 #ifdef TTGO_GATEWAY
 const uint8_t  PIN_LORA_RST = 14;
 #else
-const uint8_t  LORA_NSS = 5, LORA_DIO0 = 2, LORA_RST = 10, LORA_DIO1 = 9;
+const uint8_t  LORA_NSS = 10, LORA_DIO0 = 2, LORA_RST = 9;
+const uint8_t  RAIN_PIN   = 14, WIND_PIN = 15, VANE_PIN = 16;
 #endif
-const uint8_t  RAIN_PIN   = 11, WIND_PIN = 12, VANE_PIN = 13;
 
 const uint16_t GW_NODE_ID = 0x0000;
 const uint8_t  GW_PSK[16] = {0};
 
 #ifndef TTGO_GATEWAY
-Module* loraMod = new Module(LORA_NSS, LORA_DIO0, LORA_RST, LORA_DIO1);
+Module* loraMod = new Module(LORA_NSS, LORA_DIO0, LORA_RST, RADIOLIB_NC);
 SX1276 radio(loraMod);
 #else
 LoraRadio radio(LORA_CS, LORA_IRQ, PIN_LORA_RST);
@@ -38,7 +38,9 @@ CryptoEngine crypto;
 PicoMQTT::Server mqttBroker(1883);
 AsyncWebServer webServer(80);
 WebDashboard dashboard;
+#ifndef TTGO_GATEWAY
 WeatherStation weather(RAIN_PIN, WIND_PIN, VANE_PIN);
+#endif
 NodeManager nodeMgr;
 
 uint32_t lastWeatherMs = 0;
@@ -247,7 +249,7 @@ void initLoRa() {
 #ifdef TTGO_GATEWAY
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
 #else
-    SPI.begin(6, 8, 7, LORA_NSS);
+    SPI.begin(12, 13, 11, LORA_NSS);
 #endif
     int st = radio.begin(LORA_FREQ, 125.0f, 9, 5, 0x12, 10, 8);
     if (st != 0) {
