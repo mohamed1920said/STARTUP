@@ -104,6 +104,10 @@ function updateNodeStatuses(){
     }
   }
 }
+function removeNode(id){
+  if(!confirm('Remove node 0x'+id.toString(16).padStart(4,'0')+'?'))return;
+  ws.send(JSON.stringify({action:'remove_node',node_id:id}));
+}
 function renderNodes(nodes){
   const t=document.getElementById('nodes-tbody');t.innerHTML='';
   nodes.forEach(n=>{
@@ -113,7 +117,8 @@ function renderNodes(nodes){
       +'<td><span class="node-status" id="ns-'+n.id+'">'+st+'</span></td>'
       +'<td>'+['','sensor','actuator'][n.type]+'</td>'
       +'<td>'+n.alias+'</td>'
-      +'<td>'+n.lastSeq+'</td>';
+      +'<td>'+n.lastSeq+'</td>'
+      +'<td><button class="remove-btn" onclick="removeNode('+n.id+')">✕</button></td>';
     t.appendChild(r);
     const el=document.getElementById('ns-'+n.id);
     if(el)el.style.color=st.indexOf('Online')>=0?'#4ade80':'#f87171';

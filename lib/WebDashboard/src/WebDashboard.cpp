@@ -59,6 +59,9 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
                         uint16_t nid = doc["node_id"] | 0;
                         bool on = doc["value"] | false;
                         if (_control_cb) _control_cb(nid, on);
+                    } else if (action && strcmp(action, "remove_node") == 0) {
+                        uint16_t nid = doc["node_id"] | 0;
+                        if (_remove_cb) _remove_cb(nid);
                     } else if (action && strcmp(action, "add_node") == 0) {
                         uint16_t nid = doc["node_id"] | 0;
                         const char* psk_str = doc["psk"];

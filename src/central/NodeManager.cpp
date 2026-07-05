@@ -35,6 +35,22 @@ void NodeManager::handlePacket(uint16_t nodeId, PacketType type,
     if (_cmdCb) _cmdCb(nodeId, pt, len);
 }
 
+bool NodeManager::remove(uint16_t id) {
+    nvs_handle_t h;
+    if (nvs_open("node_db", NVS_READWRITE, &h) != ESP_OK) return false;
+    char key[16]; snprintf(key, sizeof(key), "n_%04X", id);
+    nvs_erase_key(h, key); nvs_commit(h); nvs_close(h);
+    for (int i = 0; i < _count; i++) {
+        if (_nodes[i].id == id) {
+            for (int j = i; j < _count - 1; j++) _nodes[j] = _nodes[j + 1];
+            _count--;
+            _nodes[_count].registered = false;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool NodeManager::sendCmd(uint16_t nodeId, const uint8_t* data, size_t len, uint32_t seq) {
     (void)nodeId; (void)data; (void)len; (void)seq;
     return true;

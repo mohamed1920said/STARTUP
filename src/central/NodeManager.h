@@ -22,6 +22,7 @@ public:
     NodeManager();
     void begin();
     bool provision(uint16_t id, uint8_t type, const uint8_t psk[16], const char* alias);
+    bool remove(uint16_t id);
     void handlePacket(uint16_t nodeId, PacketType type,
                       const uint8_t* plaintext, size_t len, uint32_t seq);
     bool sendCmd(uint16_t nodeId, const uint8_t* data, size_t len, uint32_t seq);

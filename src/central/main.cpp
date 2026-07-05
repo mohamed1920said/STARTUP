@@ -78,6 +78,10 @@ void setup() {
 
     dashboard.onActuatorToggle(onActuatorToggle);
     dashboard.onNodeProvision(onNodeProvision);
+    dashboard.onNodeRemove([](uint16_t id) {
+        nodeMgr.remove(id);
+        dashboard.pushLog("info", ("Node 0x" + String(id, HEX) + " removed").c_str());
+    });
     dashboard.setNodesProvider([]() -> std::string { return nodeMgr.toJson(); });
 
     Serial.print(F("[GW] Dashboard: http://")); Serial.println(WiFi.localIP());
