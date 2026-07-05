@@ -1,139 +1,91 @@
-# Security Handshake Protocol — PSK Node Registration
+# Security — PSK Provisioning & AES-128-GCM Encryption
 
 ## Overview
 
-Before a node can exchange encrypted telemetry or commands, it must
-complete a one-time registration handshake with the Central Gateway.
-The handshake uses the provisioned **Pre-Shared Key (PSK)** to
-authenticate the node without exposing secret material over the air.
+Nodes are provisioned with a 16-byte Pre-Shared Key (PSK) via the
+gateway's WebDashboard. All LoRa packets are encrypted and authenticated
+with **AES-128-GCM** using mbedtls. There is no over-the-air registration
+handshake — PSK is assigned out-of-band and stored in NVS.
 
-## Flow
+## Provisioning Flow
 
 ```
-Node                                      Gateway
-  │                                          │
-  │ [Provisioned out-of-band:                │
-  │  Node_ID=0x0001, PSK=16 bytes]           │
-  │                                          │
-  │ ── REGISTER_REQ ──────────────────────►  │
-  │    Node_ID[2] | Node_Type[1] |           │
-  │    Challenge[4]                          │
-  │                                          │
-  │    Challenge = Truncated_CMAC(           │
-  │       PSK, "lora-reg-2026" || Node_ID    │
-  │    )[0:4]                                │
-  │                                          │
-  │    ── Gateway validates:                 │
-  │    1. Lookup PSK by Node_ID              │
-  │    2. Compute expected_CMAC              │
-  │    3. Compare (timing-safe)              │
-  │    4. Store session_key in node table    │
-  │                                          │
-  │ ◄── REGISTER_ACCEPT ──────────────────── │
-  │    Node_ID[2] | Status[1]                │
-  │    Status: 0x00=OK, 0x01=Rejected        │
-  │                                          │
-  │ ── (Optional) SESSION_REKEY ──────────►  │
-  │    New session key derived from PSK       │
+Admin                           Gateway
+  │                                │
+  ├─ Open dashboard http://<ip>    │
+  ├─ Fill provision form:          │
+  │   Node ID: 0x0001              │
+  │   PSK: 32 hex characters       │
+  │   Type: Sensor                 │
+  │   Alias: Garden Soil           │
+  ├─ WebSocket action:"add_node" ──►│
+  │                                ├─ NodeManager::provision()
+  │                                ├─ nvs_set_blob("node_psk", ...)
+  │                                ├─ nvs_set_u16("node_id", ...)
+  │                                └─ Respond: success/fail
 ```
 
-## Key Derivation
+## Per-Packet Encryption
 
-```text
-Session_Key = AES_128_ECB_encrypt(PSK, Node_ID || 0x00...0)
-             = mbedtls_aes_crypt_ecb(PSK, input_block)
+### Parameters
 
-Where input_block[0..1] = Node_ID (big-endian)
-      input_block[2..15] = 0x00
+| Parameter      | Value                          |
+|----------------|--------------------------------|
+| Algorithm      | AES-128-GCM                    |
+| Key            | 16-byte PSK (per node)         |
+| Nonce/IV       | 12 bytes                       |
+| AAD            | Node_ID (2) + Type (1) + Seq (4) = 7 bytes |
+| Tag (MIC)      | 4 bytes (truncated)            |
+| Implementation | mbedtls_gcm_*                  |
+
+### Nonce Structure
+
+```
+[0x00, 0x00, 0x00, 0x00 | node_id_hi, node_id_lo | seq_bytes...]
+  4 bytes zero padding     2 bytes node ID         4 bytes counter
 ```
 
-## Code Snippet — Gateway-Side Registration Handler
+The 4-byte zero prefix ensures uniqueness even if node_id overlaps
+with the sequence counter space. The 32-bit sequence counter
+guarantees a unique nonce for every packet from a given node.
+
+### Encryption (Sensor)
 
 ```cpp
-#include <mbedtls/cmac.h>
-#include <cstring>
-
-// ─── AES-CMAC Truncation (RFC 4493) ─────────────────────────────────
-bool computeChallenge(const uint8_t psk[16], uint16_t node_id,
-                       uint8_t challenge_out[4]) {
-    mbedtls_cipher_context_t ctx;
-    mbedtls_cipher_init(&ctx);
-
-    const mbedtls_cipher_info_t* info =
-        mbedtls_cipher_info_from_type(MBEDTLS_CIPHER_AES_128_ECB);
-    if (!info) return false;
-
-    mbedtls_cipher_setup(&ctx, info);
-    mbedtls_cipher_cmac_starts(&ctx, psk, 128);
-
-    // Message: "lora-reg-2026" || Node_ID (big-endian)
-    uint8_t msg[16];
-    memcpy(msg, "lora-reg-2026", 13);
-    msg[13] = (node_id >> 8) & 0xFF;
-    msg[14] = node_id & 0xFF;
-    msg[15] = 0x00; // padding block for CMAC
-
-    uint8_t full_cmac[16];
-    mbedtls_cipher_cmac_update(&ctx, msg, 15); // 13 + 2 bytes
-    mbedtls_cipher_cmac_finish(&ctx, full_cmac);
-
-    mbedtls_cipher_free(&ctx);
-
-    // Truncate to 4 bytes
-    memcpy(challenge_out, full_cmac, 4);
-    return true;
-}
-
-// ─── Registration Handler (called on REGISTER_REQ) ──────────────────
-void handleRegistrationRequest(uint16_t req_node_id,
-                                uint8_t req_node_type,
-                                const uint8_t challenge[4]) {
-    // 1. Lookup PSK by Node_ID
-    uint8_t psk[16];
-    if (!loadPSKfromNVS(req_node_id, psk)) {
-        sendReject(req_node_id);  // Unknown node
-        return;
-    }
-
-    // 2. Compute expected challenge
-    uint8_t expected[4];
-    if (!computeChallenge(psk, req_node_id, expected)) {
-        sendReject(req_node_id);
-        return;
-    }
-
-    // 3. Timing-safe comparison
-    volatile uint8_t diff = 0;
-    for (int i = 0; i < 4; i++) {
-        diff |= challenge[i] ^ expected[i];
-    }
-
-    if (diff != 0) {
-        sendReject(req_node_id);  // Authentication failed
-        return;
-    }
-
-    // 4. Authentication OK — derive session key
-    uint8_t session_key[16];
-    CryptoEngine::deriveSessionKey(psk, req_node_id, session_key);
-
-    // 5. Store in node table + NVS
-    NodeInfo info;
-    info.id = req_node_id;
-    info.type = req_node_type;
-    memcpy(info.psk, psk, 16);
-    memcpy(info.session_key, session_key, 16);
-    info.registered = true;
-    info.last_seen = millis();
-    saveNodeInfo(info);
-
-    // 6. Register with protocol layer
-    protocolManager->registerNodeKey(req_node_id, session_key);
-
-    // 7. Send accept
-    sendAccept(req_node_id);
-}
+CryptoEngine crypto;
+crypto.begin(psk, 16);
+LoraFrame frame;
+crypto.encrypt(plaintext, len, pkt_type, seq_counter, node_id, frame);
+// frame.iv, frame.ciphertext, frame.mic populated
 ```
+
+### Decryption (Gateway)
+
+```cpp
+const uint8_t* psk = nodeMgr.getPsk(nodeId);
+if (!psk) { /* unknown node */ return; }
+CryptoEngine crypto;
+crypto.begin(psk, 16);
+crypto.decrypt(ciphertext, len, pkt_type, seq, nodeId, iv, mic);
+```
+
+## Critical Implementation Detail
+
+The gateway's `CryptoEngine::decrypt()` originally passed `GCM_TAG_SIZE` (16)
+as the `tag_len` parameter to `mbedtls_gcm_auth_decrypt`, but only 4 bytes
+(the truncated MIC) are stored and transmitted. This caused mbedtls to
+compare the full 16-byte expected tag against 4 real bytes + 12 zero bytes,
+making authentication always fail.
+
+**Fix:** Use `GCM_TAG_TRUNCATED` (4) as `tag_len`.
+
+## Replay Protection
+
+- Sensor maintains a monotonic 32-bit sequence counter (increments per
+  `sendTelemetry()` call, persisted in RAM).
+- Gateway's `NodeManager` tracks the last sequence per node.
+- Packets with `seq ≤ last_seq` are dropped.
+- Counter wraps after ~4 billion packets (negligible risk at 5s interval).
 
 ## Security Properties
 
@@ -141,33 +93,6 @@ void handleRegistrationRequest(uint16_t req_node_id,
 |--------------------|------------------------------------------------|
 | Node Identity      | Node_ID (2 bytes) — unique per device          |
 | Pre-Shared Secret  | PSK (16 bytes) — never transmitted OTA         |
-| Replay Protection  | Monotonic 32-bit sequence in every packet      |
 | Per-Packet Auth    | AES-128-GCM with 4-byte truncated MIC          |
-| Key Separation     | Session key derived from PSK + Node_ID via AES |
-| Challenge Auth     | AES-CMAC with domain-specific label            |
-
-## Provisioning (Out-of-Band)
-
-Nodes are provisioned before deployment via serial CLI:
-
-```cpp
-void provisionNodeSerial() {
-    uint16_t node_id = 0x0001;
-    uint8_t  psk[16];
-
-    // Generate random PSK using ESP32 hardware RNG
-    esp_fill_random(psk, 16);
-
-    // Store on node
-    nvs_set_blob(node_handle, "psk", psk, 16);
-    nvs_set_u16(node_handle, "node_id", node_id);
-    nvs_set_u8(node_handle, "node_type", 0x01); // sensor
-    nvs_commit(node_handle);
-
-    // Store on gateway
-    nodeManager->provisionNode(node_id, 0x01, psk, "Garden_Sensor_1");
-
-    Serial.printf("Provisioned node %04X\n", node_id);
-    // Print PSK for QR code / documentation
-}
-```
+| Replay Protection  | Monotonic 32-bit sequence counter              |
+| Key-agility        | Each node has independent PSK                  |
