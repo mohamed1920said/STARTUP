@@ -113,14 +113,19 @@ void loop() {
 }
 
 void processLoRa() {
+    if (radio.available() <= 0) return;
     uint8_t buf[LORA_MAX_PAYLOAD];
-    int state = radio.receive(buf, sizeof(buf));
-    if (state != RADIOLIB_ERR_NONE) return;
-    uint16_t len = radio.getPacketLength();
-    Serial.printf("[GW] Raw pkt: len=%u\n", len);
+    size_t len = radio.getPacketLength();
     if (len < LORA_HEADER_SIZE + MIC_SIZE || len > sizeof(buf)) {
+        radio.startReceive();
         return;
     }
+    if (radio.readData(buf, len) != 0) {
+        radio.startReceive();
+        return;
+    }
+    radio.startReceive();
+    Serial.printf("[GW] Raw pkt: len=%u\n", len);
 
     uint16_t nodeId = (buf[0] << 8) | buf[1];
     uint8_t  pktType = buf[NODE_ID_SIZE + IV_NONCE_SIZE];
@@ -232,6 +237,7 @@ void onActuatorToggle(uint16_t nodeId, bool on) {
     memcpy(tx+o, f.mic, 4); o+=4;
 
     radio.transmit(tx, o);
+    radio.startReceive();
 }
 
 void initWiFi() {
@@ -252,5 +258,6 @@ void initLoRa() {
         Serial.printf("[GW] LoRa error: %d\n", st);
         return;
     }
-    Serial.println(F("[GW] LoRa ready @ 868 MHz"));
+    st = radio.startReceive();
+    Serial.println(st == 0 ? F("[GW] LoRa ready @ 868 MHz") : "[GW] Rx start fail");
 }
