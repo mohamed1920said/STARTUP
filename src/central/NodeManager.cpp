@@ -1,7 +1,7 @@
 #include "NodeManager.h"
 #include <cstring>
 
-NodeManager::NodeManager() : _count(0), _cmdCb(nullptr) {
+NodeManager::NodeManager() : _count(0) {
     for (auto& n : _nodes) n.registered = false;
 }
 
@@ -24,6 +24,7 @@ bool NodeManager::provision(uint16_t id, uint8_t type,
     n->autoMode = false;
     n->threshold = 50;
     n->sensorId = 0;
+    n->valveOpen = false;
     strncpy(n->alias, alias, 23); n->alias[23] = 0;
     saveNVS(*n);
     return true;
@@ -35,7 +36,6 @@ void NodeManager::handlePacket(uint16_t nodeId, PacketType type,
     if (!n || !n->registered) return;
     n->lastSeen = millis();
     n->lastSeq = seq;
-    if (_cmdCb) _cmdCb(nodeId, pt, len);
 }
 
 bool NodeManager::remove(uint16_t id) {
@@ -64,9 +64,9 @@ bool NodeManager::setActuatorConfig(uint16_t id, bool autoMode, uint8_t threshol
     return true;
 }
 
-bool NodeManager::sendCmd(uint16_t nodeId, const uint8_t* data, size_t len, uint32_t seq) {
-    (void)nodeId; (void)data; (void)len; (void)seq;
-    return true;
+void NodeManager::setValveState(uint16_t id, bool open) {
+    NodeInfo* n = find(id);
+    if (n) n->valveOpen = open;
 }
 
 NodeInfo* NodeManager::find(uint16_t id) {
@@ -114,6 +114,7 @@ void NodeManager::loadNVS() {
                 _nodes[_count].autoMode = false;
                 _nodes[_count].threshold = 50;
                 _nodes[_count].sensorId = 0;
+                _nodes[_count].valveOpen = false;
                 _count++;
             }
         }

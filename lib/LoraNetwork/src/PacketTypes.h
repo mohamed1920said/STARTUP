@@ -17,13 +17,9 @@ constexpr size_t LORA_MAX_PAYLOAD    = LORA_HEADER_SIZE + LORA_MAX_CIPHERTEXT + 
 using NodeId = uint16_t;
 
 enum class PacketType : uint8_t {
-    REGISTER_REQ       = 0x01,
-    REGISTER_ACK       = 0x02,
     SENSOR_TELEMETRY   = 0x10,
     ACTUATOR_COMMAND   = 0x20,
-    ACTUATOR_STATUS    = 0x21,
     ACK                = 0x30,
-    HEARTBEAT          = 0xF0,
     UNKNOWN            = 0xFF
 };
 

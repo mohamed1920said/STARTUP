@@ -55,8 +55,6 @@ void onActuatorToggle(uint16_t nodeId, bool on);
 void onNodeProvision(uint16_t nodeId, const uint8_t psk[16], const char* type, const char* alias);
 void onActuatorConfig(uint16_t nodeId, bool autoMode, uint8_t threshold, uint16_t sensorId);
 
-// Last-known valve state per actuator node
-static bool valveState[NodeManager::MAX_NODES] = {false};
 
 void setup() {
     Serial.begin(115200); delay(1000);
@@ -174,14 +172,12 @@ static void checkAutoControl(float moisturePct) {
         const NodeInfo* ni = nodeMgr.getNode(i);
         if (!ni || ni->type != 0x02 || !ni->autoMode) continue;
         bool shouldOpen = moisturePct < ni->threshold;
-        if (shouldOpen != valveState[i]) {
-            valveState[i] = shouldOpen;
-            onActuatorToggle(ni->id, shouldOpen);
-            dashboard.pushLog("info", (String("Auto ") + (shouldOpen ? "OPEN" : "CLOSE") +
-                              " actuator 0x" + String(ni->id, HEX) +
-                              " (moisture=" + String(moisturePct, 1) +
-                              " threshold=" + String(ni->threshold) + ")").c_str());
-        }
+        if (shouldOpen == ni->valveOpen) continue;
+        onActuatorToggle(ni->id, shouldOpen);
+        dashboard.pushLog("info", (String("Auto ") + (shouldOpen ? "OPEN" : "CLOSE") +
+                          " actuator 0x" + String(ni->id, HEX) +
+                          " (moisture=" + String(moisturePct, 1) +
+                          " threshold=" + String(ni->threshold) + ")").c_str());
     }
 }
 
@@ -244,10 +240,7 @@ void onActuatorConfig(uint16_t nodeId, bool autoMode, uint8_t threshold, uint16_
 
 void onActuatorToggle(uint16_t nodeId, bool on) {
     Serial.printf("[GW] Toggle actuator %04X -> %s\n", nodeId, on ? "ON" : "OFF");
-    for (int i = 0; i < nodeMgr.count(); i++) {
-        auto* ni = nodeMgr.getNode(i);
-        if (ni && ni->id == nodeId) { valveState[i] = on; break; }
-    }
+    nodeMgr.setValveState(nodeId, on);
     ActuatorCommand cmd;
     cmd.sequence = downlinkSeq++;
     cmd.command = 0x01; cmd.value = on ? 1 : 0; cmd.timeout_s = 0;

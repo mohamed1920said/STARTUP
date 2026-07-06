@@ -6,7 +6,7 @@
 #include <PacketTypes.h>
 #include <CryptoEngine.h>
 
-const uint16_t NODE_ID      = 0x0002;
+const uint16_t NODE_ID      = 0x0001;
 const uint8_t  NODE_PSK[16] = {0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,
                                0x88,0x99,0xAA,0xBB,0xCC,0xDD,0xEE,0xFF};
 
@@ -26,6 +26,7 @@ const int MOISTURE_WET = 400;
 const uint32_t TX_INTERVAL_MS = 5000;
 uint32_t lastTxMs = 0;
 uint32_t seqCounter = 0;
+bool tempRequested = false;
 
 float readBattery() {
     uint32_t sum = 0;
@@ -40,8 +41,7 @@ bool sendTelemetry() {
     for (int i = 0; i < 16; i++) { moistADC += analogRead(MOISTURE_PIN); delayMicroseconds(100); }
     moistADC /= 16;
 
-    ds18b20.requestTemperatures();
-    delay(750);
+    if (!tempRequested) { ds18b20.requestTemperatures(); tempRequested = true; }
     float tempC = ds18b20.getTempCByIndex(0);
     bool tempOk = (tempC != DEVICE_DISCONNECTED_C);
     uint8_t err = 0;
@@ -86,6 +86,7 @@ bool sendTelemetry() {
 
     int st = radio.transmit(tx, o);
     Serial.printf("[SN] Tx %u bytes -> %s\n", o, st == RADIOLIB_ERR_NONE ? "OK" : "FAIL");
+    ds18b20.requestTemperatures();
     return (st == RADIOLIB_ERR_NONE);
 }
 
@@ -103,6 +104,8 @@ void setup() {
     }
 
     ds18b20.begin();
+    ds18b20.requestTemperatures();
+    tempRequested = true;
     sendTelemetry();
     lastTxMs = millis();
 }

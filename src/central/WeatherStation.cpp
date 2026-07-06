@@ -16,7 +16,7 @@ void WeatherStation::begin() {
 
 WeatherData WeatherStation::read() {
     uint32_t r, w;
-    do { r = _rainCnt; w = _windCnt; } while (r != _rainCnt);
+    do { r = _rainCnt; w = _windCnt; } while (r != _rainCnt || w != _windCnt);
     uint32_t dr = r - _lastRain;
     uint32_t dw = w - _lastWind;
     _lastRain = r; _lastWind = w;

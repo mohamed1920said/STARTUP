@@ -16,9 +16,8 @@ struct NodeInfo {
     bool     autoMode;
     uint8_t  threshold;
     uint16_t sensorId;
+    bool     valveOpen;
 };
-
-using NodeCmdCb = void(*)(uint16_t nodeId, const uint8_t* data, size_t len);
 
 class NodeManager {
 public:
@@ -27,10 +26,9 @@ public:
     bool provision(uint16_t id, uint8_t type, const uint8_t psk[16], const char* alias);
     bool remove(uint16_t id);
     bool setActuatorConfig(uint16_t id, bool autoMode, uint8_t threshold, uint16_t sensorId);
+    void setValveState(uint16_t id, bool open);
     void handlePacket(uint16_t nodeId, PacketType type,
                       const uint8_t* plaintext, size_t len, uint32_t seq);
-    bool sendCmd(uint16_t nodeId, const uint8_t* data, size_t len, uint32_t seq);
-    void setCmdCallback(NodeCmdCb cb) { _cmdCb = cb; }
     int count() const { return _count; }
     const NodeInfo* getNode(int i) const { return (i < _count) ? &_nodes[i] : nullptr; }
     const uint8_t* getPsk(uint16_t id) const {
@@ -44,7 +42,6 @@ public:
 private:
     NodeInfo _nodes[MAX_NODES];
     int _count;
-    NodeCmdCb _cmdCb;
     NodeInfo* find(uint16_t id);
     void saveNVS(const NodeInfo& n);
     void loadNVS();

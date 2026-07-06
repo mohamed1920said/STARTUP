@@ -1,12 +1,24 @@
 let ws=null;
 const MAX_LOG=200;
+const MAX_HISTORY=60;
+const sensorHistory={};
+
 function connectWS(){
   const p=location.protocol==='https:'?'wss:':'ws:';
   ws=new WebSocket(p+'//'+location.host+'/ws');
-  ws.onopen=()=>{document.getElementById('health-status').textContent='● Connected';document.getElementById('health-status').style.color='#4ade80'};
-  ws.onclose=()=>{document.getElementById('health-status').textContent='○ Disconnected';document.getElementById('health-status').style.color='#f87171';setTimeout(connectWS,3000)};
+  ws.onopen=()=>{
+    document.getElementById('health-status').textContent='● Connected';
+    document.getElementById('health-status').style.color='var(--accent2)';
+    showToast('Connected to gateway','success');
+  };
+  ws.onclose=()=>{
+    document.getElementById('health-status').textContent='○ Disconnected';
+    document.getElementById('health-status').style.color='var(--danger)';
+    setTimeout(connectWS,3000);
+  };
   ws.onmessage=e=>{try{handleMessage(JSON.parse(e.data))}catch(ex){console.error(ex)}};
 }
+
 function handleMessage(m){
   switch(m.type){
     case'sensor':updateSensor(m);break;
@@ -16,11 +28,27 @@ function handleMessage(m){
     case'provisioned':provisionDone(m);break;
   }
 }
+
+function showToast(msg,level='info'){
+  const c=document.getElementById('toast-container');
+  const t=document.createElement('div');t.className='toast '+level;
+  const icons={info:'ℹ',success:'✓',error:'✗',warn:'⚠'};
+  t.innerHTML='<span class="toast-icon">'+(icons[level]||'ℹ')+'</span><span>'+msg+'</span>';
+  c.appendChild(t);
+  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300)},4000);
+}
+
+function updateClock(){
+  const n=new Date();
+  document.getElementById('clock').textContent=n.toLocaleTimeString();
+}
+
 function updateWeather(w){
   document.getElementById('rain').textContent=w.rain.toFixed(2);
   document.getElementById('wind').textContent=w.wind.toFixed(1);
   document.getElementById('wind-dir').textContent=w.dir;
 }
+
 const sensorCards={},sensorLastSeen={};
 function updateSensor(s){
   const c=document.getElementById('sensor-cards');
@@ -36,8 +64,10 @@ function updateSensor(s){
       +'<div class="metric"><label>Temperature</label><span class="metric-val temp-val" id="tv-'+s.id+'">--</span></div>'
       +'<div class="metric"><label>Battery</label><div class="bar-track"><div class="bar-fill batt-bar" id="bb-'+s.id+'"></div></div><span class="metric-val" id="bv-'+s.id+'">--</span></div>'
       +'</div>'
+      +'<div class="sensor-chart"><canvas id="chart-'+s.id+'" width="300" height="50"></canvas></div>'
       +'<div class="sensor-footer"><span>RSSI: <strong id="sr-'+s.id+'">--</strong></span><span>Seq: <strong id="sq-'+s.id+'">--</strong></span></div>';
     c.appendChild(card);sensorCards[s.id]=card;
+    sensorHistory[s.id]=[];
   }
   const m=s.moisture.toFixed(1);
   document.getElementById('mb-'+s.id).style.width=Math.min(m,100)+'%';
@@ -45,24 +75,53 @@ function updateSensor(s){
   const t=s.temp.toFixed(1);
   const tv=document.getElementById('tv-'+s.id);
   tv.textContent=t+'°C';
-  tv.style.color=t<0?'#60a5fa':t>30?'#f87171':'#e0e4ec';
+  tv.style.color=t<0?'var(--accent)':t>30?'var(--danger)':'var(--text)';
   const b=s.batt.toFixed(2);
   document.getElementById('bb-'+s.id).style.width=Math.min((b/4.2)*100,100)+'%';
-  document.getElementById('bb-'+s.id).style.background=b<3.3?'#f87171':b<3.6?'#fbbf24':'#4ade80';
+  document.getElementById('bb-'+s.id).style.background=b<3.3?'var(--danger)':b<3.6?'var(--warning)':'var(--accent2)';
   document.getElementById('bv-'+s.id).textContent=b+'V';
   if(s.rssi!==undefined)document.getElementById('sr-'+s.id).textContent=s.rssi+' dBm';
   document.getElementById('sq-'+s.id).textContent=s.seq;
+  // Update history + chart
+  sensorHistory[s.id].push(s.moisture);
+  if(sensorHistory[s.id].length>MAX_HISTORY)sensorHistory[s.id].shift();
+  drawChart(s.id,sensorHistory[s.id]);
 }
+function drawChart(id,data){
+  const canvas=document.getElementById('chart-'+id);
+  if(!canvas||data.length<2)return;
+  const ctx=canvas.getContext('2d');
+  const w=canvas.width,h=canvas.height;
+  ctx.clearRect(0,0,w,h);
+  const min=Math.min(...data),max=Math.max(...data);
+  const range=Math.max(max-min,1);
+  const pad=4;
+  ctx.strokeStyle='#58a6ff';ctx.lineWidth=1.5;
+  ctx.beginPath();
+  data.forEach((v,i)=>{
+    const x=(i/(data.length-1))*(w-pad*2)+pad;
+    const y=h-pad-((v-min)/range)*(h-pad*2);
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+  // fill gradient
+  const grad=ctx.createLinearGradient(0,0,0,h);
+  grad.addColorStop(0,'rgba(88,166,255,.2)');
+  grad.addColorStop(1,'rgba(88,166,255,0)');
+  ctx.lineTo(w-pad,h-pad);ctx.lineTo(pad,h-pad);ctx.closePath();
+  ctx.fillStyle=grad;ctx.fill();
+}
+
 const actuatorCards={};
 function updateActuator(a){
   const c=document.getElementById('actuator-cards');
   let card=actuatorCards[a.id];
   if(!card){
     card=document.createElement('div');card.className='actuator-card';
-    card.innerHTML='<div class="actuator-header"><span class="sensor-name">Actuator 0x'+a.id.toString(16).padStart(4,'0')+'</span><span id="ast-'+a.id+'" class="valve-state">--</span></div>'
+    card.innerHTML='<div class="actuator-header"><span class="sensor-name">Actuator 0x'+a.id.toString(16).padStart(4,'0')+'</span><span class="valve-state" id="ast-'+a.id+'">--</span></div>'
       +'<div class="actuator-controls">'
       +'<button class="toggle-btn" id="abtn-'+a.id+'">Toggle</button>'
-      +'<span id="abatt-'+a.id+'" class="actuator-batt">--</span>'
+      +'<span class="actuator-batt" id="abatt-'+a.id+'">--</span>'
       +'</div>'
       +'<div class="actuator-auto">'
       +'<label class="auto-toggle"><input type="checkbox" id="auto-cb-'+a.id+'" onchange="setAutoCfg('+a.id+')"> Auto</label>'
@@ -73,22 +132,21 @@ function updateActuator(a){
     c.appendChild(card);actuatorCards[a.id]=card;
     document.getElementById('abtn-'+a.id).addEventListener('click',()=>toggleAct(a.id));
   }
-  document.getElementById('ast-'+a.id).textContent=a.valve?'● OPEN':'○ CLOSED';
-  document.getElementById('ast-'+a.id).style.color=a.valve?'#4ade80':'#f87171';
+  const stEl=document.getElementById('ast-'+a.id);
+  stEl.textContent=a.valve?'● OPEN':'○ CLOSED';
+  stEl.className='valve-state '+(a.valve?'on':'off');
   document.getElementById('abatt-'+a.id).textContent=a.batt.toFixed(2)+'V';
   const btn=document.getElementById('abtn-'+a.id);
   btn.textContent=a.valve?'Turn OFF':'Turn ON';
   btn.className='toggle-btn '+(a.valve?'on':'off');
-  // Restore config from node data
-  const nid=a.id;
   fetch('/api/nodes').then(r=>r.json()).then(nodes=>{
-    const n=nodes.find(x=>x.id===nid);
+    const n=nodes.find(x=>x.id===a.id);
     if(n){
-      document.getElementById('auto-cb-'+nid).checked=n.autoMode;
-      document.getElementById('auto-prm-'+nid).style.display=n.autoMode?'block':'none';
-      document.getElementById('athr-'+nid).value=n.threshold;
-      document.getElementById('athr-val-'+nid).textContent=n.threshold;
-      document.getElementById('asid-'+nid).value='0x'+n.sensorId.toString(16).padStart(4,'0');
+      document.getElementById('auto-cb-'+a.id).checked=n.autoMode;
+      document.getElementById('auto-prm-'+a.id).style.display=n.autoMode?'block':'none';
+      document.getElementById('athr-'+a.id).value=n.threshold;
+      document.getElementById('athr-val-'+a.id).textContent=n.threshold;
+      document.getElementById('asid-'+a.id).value='0x'+n.sensorId.toString(16).padStart(4,'0');
     }
   }).catch(()=>{});
 }
@@ -101,11 +159,13 @@ function setAutoCfg(id){
 }
 function toggleAct(id){
   fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node_id:id,value:true})});
+  showToast('Toggle command sent to actuator 0x'+id.toString(16).padStart(4,'0'),'info');
 }
 function provisionDone(m){
   const el=document.getElementById('provision-status');
   el.textContent=m.status==='ok'?'Node 0x'+m.id.toString(16).padStart(4,'0')+' ('+m.node_type+') registered!':'Failed: '+m.status;
-  el.style.color=m.status==='ok'?'#4ade80':'#f87171';
+  el.style.color=m.status==='ok'?'var(--accent2)':'var(--danger)';
+  if(m.status==='ok')showToast('Node 0x'+m.id.toString(16).padStart(4,'0')+' provisioned as '+m.node_type,'success');
   fetchNodes();
 }
 async function fetchNodes(){
@@ -118,24 +178,23 @@ function nodeStatus(id){
 }
 function updateNodeStatuses(){
   const t=document.getElementById('nodes-tbody');
-  if(!t)return;
-  const rows=t.children;
+  if(!t)return;const rows=t.children;
   for(let i=0;i<rows.length;i++){
-    const id=parseInt(rows[i].dataset.nid,16);
-    if(!id)continue;
+    const id=parseInt(rows[i].dataset.nid,16);if(!id)continue;
     const st=rows[i].querySelector('.node-status');
     if(st){
       const last=sensorLastSeen[id];
-      if(!last){st.textContent='○ Offline';st.style.color='#f87171';continue}
+      if(!last){st.textContent='○ Offline';st.className='node-offline';continue}
       const ago=(Date.now()-last)/1000;
       st.textContent=ago<600?'● Online':'○ Offline';
-      st.style.color=ago<600?'#4ade80':'#f87171';
+      st.className=ago<600?'node-online':'node-offline';
     }
   }
 }
 function removeNode(id){
   if(!confirm('Remove node 0x'+id.toString(16).padStart(4,'0')+'?'))return;
   ws.send(JSON.stringify({action:'remove_node',node_id:id}));
+  showToast('Removing node 0x'+id.toString(16).padStart(4,'0'),'warn');
 }
 function renderNodes(nodes){
   const t=document.getElementById('nodes-tbody');t.innerHTML='';
@@ -144,15 +203,15 @@ function renderNodes(nodes){
     const st=nodeStatus(n.id);
     r.innerHTML='<td>0x'+n.id.toString(16).padStart(4,'0')+'</td>'
       +'<td><span class="node-status" id="ns-'+n.id+'">'+st+'</span></td>'
-      +'<td>'+['','sensor','actuator'][n.type]+'</td>'
+      +'<td><span class="tag '+(n.type===2?'tag-actuator':'tag-sensor')+'">'+['','sensor','actuator'][n.type]+'</span></td>'
       +'<td>'+n.alias+'</td>'
       +'<td>'+n.lastSeq+'</td>'
-      +'<td>'+(n.type===2?(n.autoMode?'ON':'OFF'):'-')+'</td>'
+      +'<td>'+(n.type===2?(n.autoMode?'<span style="color:var(--accent2)">ON</span>':'OFF'):'-')+'</td>'
       +'<td>'+(n.type===2?n.threshold:'-')+'</td>'
       +'<td><button class="remove-btn" onclick="removeNode('+n.id+')">✕</button></td>';
     t.appendChild(r);
     const el=document.getElementById('ns-'+n.id);
-    if(el)el.style.color=st.indexOf('Online')>=0?'#4ade80':'#f87171';
+    if(el)el.className=st.indexOf('Online')>=0?'node-online':'node-offline';
   });
 }
 document.getElementById('provision-form').addEventListener('submit',e=>{
@@ -161,19 +220,21 @@ document.getElementById('provision-form').addEventListener('submit',e=>{
   const psk=document.getElementById('p-psk').value.trim();
   const type=document.getElementById('p-type').value;
   const alias=document.getElementById('p-alias').value.trim()||'unnamed';
-  if(!id||isNaN(id)||psk.length!==32)return;
+  if(!id||isNaN(id)||psk.length!==32){showToast('Invalid node ID or PSK (need 32 hex chars)','error');return;}
   ws.send(JSON.stringify({action:'add_node',node_id:id,psk:psk,node_type:type,alias:alias}));
   document.getElementById('provision-status').textContent='Sending provisioning request for node 0x'+id.toString(16).padStart(4,'0')+'...';
+  showToast('Provisioning node 0x'+id.toString(16).padStart(4,'0')+'...','info');
 });
 document.getElementById('ota-form').addEventListener('submit',async e=>{
   e.preventDefault();const file=e.target.querySelector('input[type=file]').files[0];
   if(!file)return;const fd=new FormData();fd.append('firmware',file);
   document.getElementById('ota-progress').textContent='Uploading...';
-  try{const r=await fetch('/api/ota/upload',{method:'POST',body:fd});const j=await r.json();document.getElementById('ota-progress').textContent=j.msg||'Update triggered'}catch(ex){document.getElementById('ota-progress').textContent='Error: '+ex.message}
+  showToast('OTA firmware upload started','info');
+  try{const r=await fetch('/api/ota/upload',{method:'POST',body:fd});const j=await r.json();document.getElementById('ota-progress').textContent=j.msg||'Update triggered';showToast('OTA update triggered','success')}catch(ex){document.getElementById('ota-progress').textContent='Error: '+ex.message;showToast('OTA error: '+ex.message,'error')}
 });
 async function restartGw(){
   if(!confirm('Restart the gateway?'))return;
-  try{await fetch('/api/restart',{method:'POST'});}catch(ex){}
+  try{showToast('Gateway restarting...','warn');await fetch('/api/restart',{method:'POST'});}catch(ex){}
 }
 function appendLog(l){
   const el=document.getElementById('log-output');
@@ -183,6 +244,18 @@ function appendLog(l){
   el.scrollTop=el.scrollHeight;
 }
 async function pollHealth(){
-  try{const r=await fetch('/api/health');const h=await r.json();document.getElementById('health-status').textContent='● Uptime: '+h.uptime+'s Free: '+(h.free_heap/1024).toFixed(0)+'KB RSSI: '+h.rssi+'dBm'}catch(ex){}
+  try{const r=await fetch('/api/health');const h=await r.json();
+    document.getElementById('health-status').textContent='● Uptime: '+h.uptime+'s · Free: '+(h.free_heap/1024).toFixed(0)+'KB · RSSI: '+h.rssi+'dBm';
+    document.getElementById('gw-uptime').textContent=h.uptime+'s';
+    document.getElementById('gw-heap').textContent=(h.free_heap/1024).toFixed(0)+'KB';
+    document.getElementById('gw-rssi').textContent=h.rssi+'dBm';
+  }catch(ex){}
 }
-document.addEventListener('DOMContentLoaded',()=>{connectWS();setInterval(pollHealth,15000);setInterval(fetchNodes,10000);setInterval(updateNodeStatuses,5000);fetchNodes()});
+document.addEventListener('DOMContentLoaded',()=>{
+  connectWS();
+  setInterval(pollHealth,15000);
+  setInterval(fetchNodes,10000);
+  setInterval(updateNodeStatuses,5000);
+  setInterval(updateClock,1000);
+  fetchNodes();updateClock();
+});

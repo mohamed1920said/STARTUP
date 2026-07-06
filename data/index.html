@@ -3,27 +3,44 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LoRa Network Dashboard</title>
+<title>LoRa Network Control</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <nav>
-  <h1>LoRa Network Control</h1>
-  <span id="health-status">Connecting...</span>
+  <h1>LoRa Network</h1>
+  <div id="health-bar">
+    <span id="health-status">Connecting...</span>
+    <span id="clock"></span>
+  </div>
 </nav>
 <main>
+  <section id="summary">
+    <h2>System Overview</h2>
+    <div class="grid-3">
+      <div class="card"><label>Uptime</label><span id="gw-uptime">--</span><span class="unit">s</span></div>
+      <div class="card"><label>Free Heap</label><span id="gw-heap">--</span><span class="unit">KB</span></div>
+      <div class="card"><label>WiFi RSSI</label><span id="gw-rssi">--</span><span class="unit">dBm</span></div>
+    </div>
+  </section>
+
   <section id="weather">
     <h2>Weather Station</h2>
     <div class="grid-3">
-      <div class="card"><label>Rain</label><span id="rain">--</span><small>mm</small></div>
-      <div class="card"><label>Wind</label><span id="wind">--</span><small>m/s</small></div>
-      <div class="card"><label>Dir</label><span id="wind-dir">--</span><small>°</small></div>
+      <div class="card"><label>Rain</label><span id="rain">--</span><span class="unit">mm</span></div>
+      <div class="card"><label>Wind</label><span id="wind">--</span><span class="unit">m/s</span></div>
+      <div class="card"><label>Dir</label><span id="wind-dir">--</span><span class="unit">°</span></div>
     </div>
   </section>
 
   <section id="sensors">
     <h2>Sensor Monitoring</h2>
-    <div id="sensor-cards"><div id="sensor-placeholder" style="text-align:center;padding:3rem;color:#4a5466;font-size:.9rem">⏳ Waiting for sensor data...</div></div>
+    <div id="sensor-cards"><div id="sensor-placeholder" class="empty-state"><span class="spinner"></span><br><br>Waiting for sensor data...</div></div>
+  </section>
+
+  <section id="actuators">
+    <h2>Actuator Nodes</h2>
+    <div id="actuator-cards"><div class="empty-state">No actuator data yet</div></div>
   </section>
 
   <section id="provisioning">
@@ -49,16 +66,11 @@
     </table>
   </section>
 
-  <section id="actuators">
-    <h2>Actuator Nodes</h2>
-    <div id="actuator-cards"></div>
-  </section>
-
   <section id="ota">
     <h2>Firmware Update (OTA)</h2>
     <form id="ota-form" enctype="multipart/form-data">
       <input type="file" name="firmware" accept=".bin">
-      <button type="submit">Upload & Update</button>
+      <button type="submit">Upload &amp; Update</button>
     </form>
     <div id="ota-progress"></div>
   </section>
@@ -72,6 +84,7 @@
     <pre id="log-output"></pre>
   </section>
 </main>
+<div id="toast-container" class="toast-container"></div>
 <script src="/app.js"></script>
 </body>
 </html>

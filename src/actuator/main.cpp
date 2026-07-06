@@ -38,6 +38,7 @@ const uint32_t LISTEN_INTERVAL_MS = 15000;
 const uint32_t RX_TIMEOUT_MS      = 3000;
 uint32_t lastListenMs = 0;
 uint32_t lastSeq = 0;
+uint32_t ackSeqCounter = 1;
 
 const uint8_t BATT_PIN = 35;
 float readBattery() {
@@ -165,7 +166,7 @@ void sendAck(uint32_t ackSeq) {
     f.pkt_type = (uint8_t)PacketType::ACK;
 
     if (!crypto.encrypt(pt, sizeof(ack), (uint8_t)PacketType::ACK,
-                         ackSeq, NODE_ID, f)) return;
+                         ackSeqCounter++, NODE_ID, f)) return;
 
     uint8_t tx[LORA_MAX_PAYLOAD]; size_t o = 0;
     memcpy(tx+o, f.node_id, 2); o+=2;
