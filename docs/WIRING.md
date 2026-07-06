@@ -73,7 +73,7 @@ TB6612FNG Motor Driver:
   ├────────────────┼──────────────────────┤
   │ AIN1           │  GPIO 2             │
   │ AIN2           │  GPIO 4             │
-  │ PWMA           │  GPIO 16            │
+  │ PWMA           │  GPIO 23            │
   │ STBY           │  GPIO 17            │
   │ VMOT           │  Battery + (4.5-6V) │
   │ VCC            │  3.3V               │

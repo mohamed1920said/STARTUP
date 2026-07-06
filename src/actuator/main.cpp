@@ -15,7 +15,7 @@ SX1276 radio(&loraMod);
 
 const uint8_t AIN1 = 2;
 const uint8_t AIN2 = 4;
-const uint8_t PWMA = 16;
+const uint8_t PWMA = 23;
 const uint8_t STBY = 17;
 const uint8_t VALVE_FB_PIN = 3;
 const uint32_t VALVE_PULSE_MS = 30;
