@@ -13,9 +13,26 @@ const uint8_t  PIN_RST = 14;
 Module loraMod(LORA_CS, LORA_IRQ, PIN_RST, RADIOLIB_NC);
 SX1276 radio(&loraMod);
 
-const uint8_t VALVE_CTL_PIN = 2;
-const uint8_t VALVE_FB_PIN  = 3;
+const uint8_t AIN1 = 2;
+const uint8_t AIN2 = 4;
+const uint8_t PWMA = 16;
+const uint8_t STBY = 17;
+const uint8_t VALVE_FB_PIN = 3;
+const uint32_t VALVE_PULSE_MS = 30;
 bool valveOpen = false;
+
+void valveSet(bool open) {
+    digitalWrite(STBY, HIGH);
+    digitalWrite(AIN1, open ? HIGH : LOW);
+    digitalWrite(AIN2, open ? LOW : HIGH);
+    digitalWrite(PWMA, HIGH);
+    delay(VALVE_PULSE_MS);
+    digitalWrite(PWMA, LOW);
+    digitalWrite(AIN1, LOW);
+    digitalWrite(AIN2, LOW);
+    digitalWrite(STBY, LOW);
+    valveOpen = open;
+}
 
 const uint32_t LISTEN_INTERVAL_MS = 15000;
 const uint32_t RX_TIMEOUT_MS      = 3000;
@@ -37,7 +54,10 @@ void setup() {
     Serial.begin(115200); delay(100);
     Serial.printf("[AN] Actuator Node %04X starting\n", NODE_ID);
 
-    pinMode(VALVE_CTL_PIN, OUTPUT); digitalWrite(VALVE_CTL_PIN, LOW);
+    pinMode(AIN1, OUTPUT); pinMode(AIN2, OUTPUT);
+    pinMode(PWMA, OUTPUT); pinMode(STBY, OUTPUT);
+    digitalWrite(AIN1, LOW); digitalWrite(AIN2, LOW);
+    digitalWrite(PWMA, LOW); digitalWrite(STBY, LOW);
     if (VALVE_FB_PIN != 0xFF) pinMode(VALVE_FB_PIN, INPUT_PULLUP);
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
@@ -119,8 +139,7 @@ void listenForCommand() {
 
     ActuatorCommand* cmd = (ActuatorCommand*)pt;
     if (cmd->command == 0x01) {
-        valveOpen = (cmd->value != 0);
-        digitalWrite(VALVE_CTL_PIN, valveOpen ? HIGH : LOW);
+        valveSet(cmd->value != 0);
         Serial.printf("[AN] Valve -> %s\n", valveOpen ? "OPEN" : "CLOSED");
         sendAck(cmd->sequence);
     }
