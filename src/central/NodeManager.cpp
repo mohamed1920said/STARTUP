@@ -21,6 +21,9 @@ bool NodeManager::provision(uint16_t id, uint8_t type,
     n->registered = true;
     n->lastSeq = 0;
     n->lastSeen = millis();
+    n->autoMode = false;
+    n->threshold = 50;
+    n->sensorId = 0;
     strncpy(n->alias, alias, 23); n->alias[23] = 0;
     saveNVS(*n);
     return true;
@@ -51,6 +54,16 @@ bool NodeManager::remove(uint16_t id) {
     return false;
 }
 
+bool NodeManager::setActuatorConfig(uint16_t id, bool autoMode, uint8_t threshold, uint16_t sensorId) {
+    NodeInfo* n = find(id);
+    if (!n || !n->registered) return false;
+    n->autoMode = autoMode;
+    n->threshold = constrain(threshold, 0, 100);
+    n->sensorId = sensorId;
+    saveNVS(*n);
+    return true;
+}
+
 bool NodeManager::sendCmd(uint16_t nodeId, const uint8_t* data, size_t len, uint32_t seq) {
     (void)nodeId; (void)data; (void)len; (void)seq;
     return true;
@@ -76,10 +89,12 @@ std::string NodeManager::toJson() const {
         if (i > 0) json += ",";
         char buf[256];
         snprintf(buf, sizeof(buf),
-            R"({"id":%u,"type":%u,"alias":"%s","registered":%s,"lastSeq":%u,"lastSeen":%u})",
+            R"({"id":%u,"type":%u,"alias":"%s","registered":%s,"lastSeq":%u,"lastSeen":%u,"autoMode":%s,"threshold":%u,"sensorId":%u})",
             _nodes[i].id, _nodes[i].type, _nodes[i].alias,
             _nodes[i].registered ? "true" : "false",
-            _nodes[i].lastSeq, _nodes[i].lastSeen);
+            _nodes[i].lastSeq, _nodes[i].lastSeen,
+            _nodes[i].autoMode ? "true" : "false",
+            _nodes[i].threshold, _nodes[i].sensorId);
         json += buf;
     }
     json += "]";
@@ -94,8 +109,13 @@ void NodeManager::loadNVS() {
         nvs_entry_info_t ei; nvs_entry_info(it, &ei);
         if (_count < MAX_NODES) {
             size_t sz = sizeof(NodeInfo);
-            if (nvs_get_blob(h, ei.key, &_nodes[_count], &sz) == ESP_OK)
+            NodeInfo& ni = _nodes[_count];
+            if (nvs_get_blob(h, ei.key, &ni, &sz) == ESP_OK) {
+                _nodes[_count].autoMode = false;
+                _nodes[_count].threshold = 50;
+                _nodes[_count].sensorId = 0;
                 _count++;
+            }
         }
         it = nvs_entry_next(it);
     }

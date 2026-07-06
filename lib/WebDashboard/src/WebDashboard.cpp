@@ -75,6 +75,12 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
                             }
                             _provision_cb(nid, psk, type, alias);
                         }
+                    } else if (action && strcmp(action, "set_actuator_config") == 0) {
+                        uint16_t nid = doc["node_id"] | 0;
+                        bool autoMode = doc["auto_mode"] | false;
+                        uint8_t threshold = doc["threshold"] | 50;
+                        uint16_t sensorId = doc["sensor_id"] | 0;
+                        if (_actuator_cfg_cb) _actuator_cfg_cb(nid, autoMode, threshold, sensorId);
                     }
                 }
             }

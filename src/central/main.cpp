@@ -53,6 +53,10 @@ void onDecryptedPkt(uint16_t node, PacketType type,
                      const uint8_t* pt, size_t len, uint32_t seq);
 void onActuatorToggle(uint16_t nodeId, bool on);
 void onNodeProvision(uint16_t nodeId, const uint8_t psk[16], const char* type, const char* alias);
+void onActuatorConfig(uint16_t nodeId, bool autoMode, uint8_t threshold, uint16_t sensorId);
+
+// Last-known valve state per actuator node
+static bool valveState[NodeManager::MAX_NODES] = {false};
 
 void setup() {
     Serial.begin(115200); delay(1000);
@@ -82,6 +86,7 @@ void setup() {
         nodeMgr.remove(id);
         dashboard.pushLog("info", ("Node 0x" + String(id, HEX) + " removed").c_str());
     });
+    dashboard.onActuatorConfig(onActuatorConfig);
     dashboard.setNodesProvider([]() -> std::string { return nodeMgr.toJson(); });
 
     Serial.print(F("[GW] Dashboard: http://")); Serial.println(WiFi.localIP());
@@ -113,18 +118,22 @@ void loop() {
 }
 
 void processLoRa() {
-    if (radio.available() <= 0) return;
     uint8_t buf[LORA_MAX_PAYLOAD];
-    size_t len = radio.getPacketLength();
-    if (len < LORA_HEADER_SIZE + MIC_SIZE || len > sizeof(buf)) {
-        radio.startReceive();
-        return;
-    }
-    if (radio.readData(buf, len) != 0) {
-        radio.startReceive();
-        return;
-    }
+    size_t len;
+#ifdef TTGO_GATEWAY
+    if (radio.available() <= 0) return;
+    len = radio.getPacketLength();
+    if (len < LORA_HEADER_SIZE + MIC_SIZE || len > sizeof(buf)) { radio.startReceive(); return; }
+    if (radio.readData(buf, len) != 0) { radio.startReceive(); return; }
     radio.startReceive();
+#else
+    // Non-blocking: poll IRQ register directly (bypass DIO0 interrupt)
+    if (!(radio.getIRQFlags() & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE)) return;
+    len = radio.getPacketLength();
+    if (len < LORA_HEADER_SIZE + MIC_SIZE || len > sizeof(buf)) { radio.startReceive(); return; }
+    if (radio.readData(buf, len) != 0) { radio.startReceive(); return; }
+    radio.startReceive();
+#endif
     Serial.printf("[GW] Raw pkt: len=%u\n", len);
 
     uint16_t nodeId = (buf[0] << 8) | buf[1];
@@ -160,6 +169,22 @@ void processLoRa() {
     onDecryptedPkt(nodeId, (PacketType)pktType, pt, ctLen, seq);
 }
 
+static void checkAutoControl(float moisturePct) {
+    for (int i = 0; i < nodeMgr.count(); i++) {
+        const NodeInfo* ni = nodeMgr.getNode(i);
+        if (!ni || ni->type != 0x02 || !ni->autoMode) continue;
+        bool shouldOpen = moisturePct < ni->threshold;
+        if (shouldOpen != valveState[i]) {
+            valveState[i] = shouldOpen;
+            onActuatorToggle(ni->id, shouldOpen);
+            dashboard.pushLog("info", (String("Auto ") + (shouldOpen ? "OPEN" : "CLOSE") +
+                              " actuator 0x" + String(ni->id, HEX) +
+                              " (moisture=" + String(moisturePct, 1) +
+                              " threshold=" + String(ni->threshold) + ")").c_str());
+        }
+    }
+}
+
 void onDecryptedPkt(uint16_t nodeId, PacketType type,
                      const uint8_t* pt, size_t len, uint32_t seq) {
     nodeMgr.handlePacket(nodeId, type, pt, len, seq);
@@ -180,6 +205,8 @@ void onDecryptedPkt(uint16_t nodeId, PacketType type,
             d.node_id = nodeId; d.moisture_percent = mp; d.temperature_c = tc;
             d.battery_v = bv; d.sequence = st->sequence; d.rssi = 0; d.timestamp = millis();
             dashboard.pushSensorTelemetry(d);
+
+            checkAutoControl(mp);
             break;
         }
         case PacketType::ACK: {
@@ -207,8 +234,20 @@ void onNodeProvision(uint16_t nodeId, const uint8_t psk[16], const char* type, c
     }
 }
 
+void onActuatorConfig(uint16_t nodeId, bool autoMode, uint8_t threshold, uint16_t sensorId) {
+    if (nodeMgr.setActuatorConfig(nodeId, autoMode, threshold, sensorId)) {
+        Serial.printf("[GW] Actuator 0x%04X config: auto=%s threshold=%u sensorId=%u\n",
+                      nodeId, autoMode ? "ON" : "OFF", threshold, sensorId);
+        dashboard.pushLog("info", ("Actuator 0x" + String(nodeId, HEX) + " config updated").c_str());
+    }
+}
+
 void onActuatorToggle(uint16_t nodeId, bool on) {
     Serial.printf("[GW] Toggle actuator %04X -> %s\n", nodeId, on ? "ON" : "OFF");
+    for (int i = 0; i < nodeMgr.count(); i++) {
+        auto* ni = nodeMgr.getNode(i);
+        if (ni && ni->id == nodeId) { valveState[i] = on; break; }
+    }
     ActuatorCommand cmd;
     cmd.sequence = downlinkSeq++;
     cmd.command = 0x01; cmd.value = on ? 1 : 0; cmd.timeout_s = 0;
@@ -259,5 +298,5 @@ void initLoRa() {
         return;
     }
     st = radio.startReceive();
-    Serial.println(st == 0 ? F("[GW] LoRa ready @ 868 MHz") : "[GW] Rx start fail");
+    if (st == 0) { Serial.println("[GW] LoRa ready @ 868 MHz"); } else { Serial.println("[GW] Rx start fail"); }
 }

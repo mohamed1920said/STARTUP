@@ -16,10 +16,19 @@ th{background:#1a212e;padding:.75rem 1rem;text-align:left;font-size:.75rem;color
 td{padding:.75rem 1rem;border-top:1px solid #2a3240;font-size:.9rem}
 .remove-btn{background:transparent;border:1px solid #5a3a3a;color:#f87171;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:.8rem}
 .remove-btn:hover{background:#5a1a1a}
-#actuator-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem}
+#actuator-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem}
 .actuator-card{background:#151a24;border:1px solid #2a3240;border-radius:8px;padding:1.25rem}
-.actuator-card h3{font-size:1rem;margin-bottom:.75rem}
-.actuator-card .state{font-size:1.25rem;font-weight:600;margin-bottom:1rem}
+.actuator-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;padding-bottom:.5rem;border-bottom:1px solid #2a3240}
+.valve-state{font-size:1rem;font-weight:600}
+.actuator-controls{display:flex;gap:1rem;align-items:center;margin-bottom:.75rem}
+.actuator-batt{font-size:.8rem;color:#6a7486}
+.actuator-auto{margin-top:.5rem;padding-top:.5rem;border-top:1px solid #2a3240;font-size:.85rem}
+.auto-toggle{display:flex;align-items:center;gap:.5rem;cursor:pointer;margin-bottom:.5rem;color:#6a7486}
+.auto-toggle input[type=checkbox]{accent-color:#6c8cff;width:1.1rem;height:1.1rem;cursor:pointer}
+.auto-params{display:flex;flex-direction:column;gap:.5rem;padding:.5rem;background:#0f131c;border-radius:6px}
+.auto-params label{font-size:.8rem;color:#8a94a6;display:flex;align-items:center;gap:.5rem}
+.auto-params input[type=range]{flex:1;accent-color:#6c8cff;cursor:pointer}
+.auto-sensor{width:6rem;background:#151a24;border:1px solid #2a3240;border-radius:4px;color:#e0e4ec;padding:.3rem .5rem;font-size:.8rem}
 .toggle-btn{background:#2a3240;border:none;color:#e0e4ec;padding:.6rem 1.5rem;border-radius:6px;cursor:pointer;font-size:.9rem}
 .toggle-btn:hover{background:#3a455a}
 .toggle-btn.on{background:#2d6b3f}

@@ -59,7 +59,17 @@ function updateActuator(a){
   let card=actuatorCards[a.id];
   if(!card){
     card=document.createElement('div');card.className='actuator-card';
-    card.innerHTML='<h3>Actuator '+a.id+'</h3><div class="state" id="ast-'+a.id+'">--</div><button class="toggle-btn" id="abtn-'+a.id+'" data-id="'+a.id+'">Toggle</button><div style="margin-top:.5rem;font-size:.8rem;color:#6a7486">Batt: <span id="abatt-'+a.id+'">--</span></div>';
+    card.innerHTML='<div class="actuator-header"><span class="sensor-name">Actuator 0x'+a.id.toString(16).padStart(4,'0')+'</span><span id="ast-'+a.id+'" class="valve-state">--</span></div>'
+      +'<div class="actuator-controls">'
+      +'<button class="toggle-btn" id="abtn-'+a.id+'">Toggle</button>'
+      +'<span id="abatt-'+a.id+'" class="actuator-batt">--</span>'
+      +'</div>'
+      +'<div class="actuator-auto">'
+      +'<label class="auto-toggle"><input type="checkbox" id="auto-cb-'+a.id+'" onchange="setAutoCfg('+a.id+')"> Auto</label>'
+      +'<div class="auto-params" id="auto-prm-'+a.id+'" style="display:none">'
+      +'<label>Threshold: <span id="athr-val-'+a.id+'">50</span>%<br><input type="range" min="0" max="100" value="50" id="athr-'+a.id+'" oninput="document.getElementById(\'athr-val-'+a.id+'\').textContent=this.value;setAutoCfg('+a.id+')"></label>'
+      +'<label>Sensor ID: <input type="text" class="auto-sensor" id="asid-'+a.id+'" value="0x0001" onchange="setAutoCfg('+a.id+')"></label>'
+      +'</div></div>';
     c.appendChild(card);actuatorCards[a.id]=card;
     document.getElementById('abtn-'+a.id).addEventListener('click',()=>toggleAct(a.id));
   }
@@ -69,6 +79,25 @@ function updateActuator(a){
   const btn=document.getElementById('abtn-'+a.id);
   btn.textContent=a.valve?'Turn OFF':'Turn ON';
   btn.className='toggle-btn '+(a.valve?'on':'off');
+  // Restore config from node data
+  const nid=a.id;
+  fetch('/api/nodes').then(r=>r.json()).then(nodes=>{
+    const n=nodes.find(x=>x.id===nid);
+    if(n){
+      document.getElementById('auto-cb-'+nid).checked=n.autoMode;
+      document.getElementById('auto-prm-'+nid).style.display=n.autoMode?'block':'none';
+      document.getElementById('athr-'+nid).value=n.threshold;
+      document.getElementById('athr-val-'+nid).textContent=n.threshold;
+      document.getElementById('asid-'+nid).value='0x'+n.sensorId.toString(16).padStart(4,'0');
+    }
+  }).catch(()=>{});
+}
+function setAutoCfg(id){
+  const auto=document.getElementById('auto-cb-'+id).checked;
+  document.getElementById('auto-prm-'+id).style.display=auto?'block':'none';
+  const thr=parseInt(document.getElementById('athr-'+id).value);
+  const sid=parseInt(document.getElementById('asid-'+id).value,16)||0;
+  ws.send(JSON.stringify({action:'set_actuator_config',node_id:id,auto_mode:auto,threshold:thr,sensor_id:sid}));
 }
 function toggleAct(id){
   fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node_id:id,value:true})});
@@ -118,6 +147,8 @@ function renderNodes(nodes){
       +'<td>'+['','sensor','actuator'][n.type]+'</td>'
       +'<td>'+n.alias+'</td>'
       +'<td>'+n.lastSeq+'</td>'
+      +'<td>'+(n.type===2?(n.autoMode?'ON':'OFF'):'-')+'</td>'
+      +'<td>'+(n.type===2?n.threshold:'-')+'</td>'
       +'<td><button class="remove-btn" onclick="removeNode('+n.id+')">✕</button></td>';
     t.appendChild(r);
     const el=document.getElementById('ns-'+n.id);

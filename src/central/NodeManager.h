@@ -13,6 +13,9 @@ struct NodeInfo {
     uint32_t lastSeq;
     uint32_t lastSeen;
     char     alias[24];
+    bool     autoMode;
+    uint8_t  threshold;
+    uint16_t sensorId;
 };
 
 using NodeCmdCb = void(*)(uint16_t nodeId, const uint8_t* data, size_t len);
@@ -23,6 +26,7 @@ public:
     void begin();
     bool provision(uint16_t id, uint8_t type, const uint8_t psk[16], const char* alias);
     bool remove(uint16_t id);
+    bool setActuatorConfig(uint16_t id, bool autoMode, uint8_t threshold, uint16_t sensorId);
     void handlePacket(uint16_t nodeId, PacketType type,
                       const uint8_t* plaintext, size_t len, uint32_t seq);
     bool sendCmd(uint16_t nodeId, const uint8_t* data, size_t len, uint32_t seq);
@@ -35,9 +39,9 @@ public:
         return nullptr;
     }
     std::string toJson() const;
+    static constexpr int MAX_NODES = 16;
 
 private:
-    static constexpr int MAX_NODES = 16;
     NodeInfo _nodes[MAX_NODES];
     int _count;
     NodeCmdCb _cmdCb;

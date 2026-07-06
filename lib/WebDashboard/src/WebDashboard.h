@@ -30,6 +30,7 @@ struct ActuatorStateData {
 using ControlCallback = std::function<void(uint16_t node_id, bool on)>;
 using ProvisionCallback = std::function<void(uint16_t node_id, const uint8_t psk[16], const char* type, const char* alias)>;
 using RemoveCallback = std::function<void(uint16_t node_id)>;
+using ActuatorCfgCallback = std::function<void(uint16_t node_id, bool autoMode, uint8_t threshold, uint16_t sensorId)>;
 using NodesProvider = std::function<std::string()>;
 
 class WebDashboard {
@@ -44,6 +45,7 @@ public:
     void onActuatorToggle(ControlCallback cb) { _control_cb = cb; }
     void onNodeProvision(ProvisionCallback cb) { _provision_cb = cb; }
     void onNodeRemove(RemoveCallback cb) { _remove_cb = cb; }
+    void onActuatorConfig(ActuatorCfgCallback cb) { _actuator_cfg_cb = cb; }
     void setNodesProvider(NodesProvider cb) { _nodesProvider = cb; }
     void loop();
 private:
@@ -52,6 +54,7 @@ private:
     ControlCallback _control_cb;
     ProvisionCallback _provision_cb;
     RemoveCallback _remove_cb;
+    ActuatorCfgCallback _actuator_cfg_cb;
     NodesProvider _nodesProvider;
     void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                    AwsEventType type, void* arg, uint8_t* data, size_t len);
