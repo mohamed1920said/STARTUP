@@ -157,6 +157,11 @@ void WebDashboard::registerApiHandlers() {
             request->send(200, "application/json", "[]");
         }
     });
+    _server->on("/api/restart", HTTP_POST, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", R"({"status":"restarting"})");
+        delay(100);
+        ESP.restart();
+    });
     _server->on("/api/control", HTTP_POST,
         [](AsyncWebServerRequest* request) {},
         nullptr,

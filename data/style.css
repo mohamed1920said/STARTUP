@@ -46,6 +46,8 @@ td{padding:.75rem 1rem;border-top:1px solid #2a3240;font-size:.9rem}
 #provision-form button{background:#6c8cff;border:none;color:#0b0e14;padding:0.5rem 1.25rem;border-radius:6px;cursor:pointer;font-weight:600;font-size:0.9rem}
 #provision-status{font-size:0.85rem;color:#8a94a6;min-height:1.2rem}
 #ota-form{display:flex;gap:1rem;align-items:center;margin-bottom:1rem}
+#restart-btn{background:#5a2d2d;border:none;color:#f87171;padding:.5rem 1.5rem;border-radius:6px;cursor:pointer;font-weight:600;margin-bottom:1rem}
+#restart-btn:hover{background:#7a3a3a}
 #ota-form input[type=file]{background:#151a24;border:1px solid #2a3240;padding:.5rem 1rem;border-radius:6px;color:#e0e4ec}
 #ota-form button{background:#6c8cff;border:none;color:#0b0e14;padding:.5rem 1.5rem;border-radius:6px;cursor:pointer;font-weight:600}
 #log-output{background:#0a0d12;padding:1rem;border-radius:8px;font-size:.8rem;max-height:200px;overflow-y:auto;color:#6a9f6a;line-height:1.5}

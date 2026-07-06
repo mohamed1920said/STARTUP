@@ -140,6 +140,10 @@ document.getElementById('ota-form').addEventListener('submit',async e=>{
   document.getElementById('ota-progress').textContent='Uploading...';
   try{const r=await fetch('/api/ota/upload',{method:'POST',body:fd});const j=await r.json();document.getElementById('ota-progress').textContent=j.msg||'Update triggered'}catch(ex){document.getElementById('ota-progress').textContent='Error: '+ex.message}
 });
+async function restartGw(){
+  if(!confirm('Restart the gateway?'))return;
+  try{await fetch('/api/restart',{method:'POST'});}catch(ex){}
+}
 function appendLog(l){
   const el=document.getElementById('log-output');
   const line='['+new Date().toLocaleTimeString()+'] ['+l.level+'] '+l.msg;
