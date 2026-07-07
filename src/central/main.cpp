@@ -7,8 +7,7 @@
 #include <LoraRadio.h>
 #endif
 #include <PicoMQTT.h>
-#include <PacketTypes.h>
-#include <CryptoEngine.h>
+#include <LoraProtocol.h>
 #include <MqttTopics.h>
 #include <WebDashboard.h>
 #include "WeatherStation.h"
@@ -34,7 +33,6 @@ SX1276 radio(loraMod);
 #else
 LoraRadio radio(LORA_CS, LORA_IRQ, PIN_LORA_RST);
 #endif
-CryptoEngine crypto;
 PicoMQTT::Server mqttBroker(1883);
 AsyncWebServer webServer(80);
 WebDashboard dashboard;
@@ -62,8 +60,6 @@ void setup() {
 
     initWiFi(); Serial.println(F("[DBG] WiFi done"));
     Serial.printf("[DBG] Free heap: %u\n", ESP.getFreeHeap()); Serial.flush();
-
-    crypto.begin(GW_PSK, 16); Serial.println(F("[DBG] Crypto done"));
 
     initLoRa(); Serial.println(F("[DBG] LoRa done"));
 
@@ -142,37 +138,39 @@ void processLoRa() {
     size_t ctLen = len - LORA_HEADER_SIZE - MIC_SIZE;
     if (ctLen > LORA_MAX_CIPHERTEXT) return;
 
-    LoraFrame frame;
-    memcpy(frame.node_id, buf, NODE_ID_SIZE);
-    memcpy(frame.iv, buf + NODE_ID_SIZE, IV_NONCE_SIZE);
-    frame.pkt_type = pktType;
-    memcpy(frame.ciphertext, buf + LORA_HEADER_SIZE, ctLen);
-    memcpy(frame.mic, buf + LORA_HEADER_SIZE + ctLen, MIC_SIZE);
-    frame.ciphertext_len = ctLen;
+    const uint8_t* iv = buf + NODE_ID_SIZE;
+    const uint8_t* ct = buf + LORA_HEADER_SIZE;
+    const uint8_t* mic = ct + ctLen;
 
     const uint8_t* nodePsk = nodeMgr.getPsk(nodeId);
     if (!nodePsk) {
         Serial.printf("[GW] Unknown node %04X\n", nodeId);
         return;
     }
-    CryptoEngine nodeCrypto;
-    if (!nodeCrypto.begin(nodePsk, 16)) return;
 
     uint8_t pt[LORA_MAX_CIPHERTEXT];
-    memcpy(pt, frame.ciphertext, ctLen);
-    if (!nodeCrypto.decrypt(pt, ctLen, pktType, seq, nodeId, frame)) {
-        Serial.printf("[GW] Decrypt fail node=%04X seq=%u\n", nodeId, seq);
+    memcpy(pt, ct, ctLen);
+
+    LoraCrypto nodeCrypto;
+    nodeCrypto.setKey(nodePsk, 16);
+    CryptoResult cr = nodeCrypto.decrypt(pt, ctLen, pktType, seq, nodeId, iv, mic);
+    if (cr != CryptoResult::OK) {
+        Serial.printf("[GW] Decrypt fail node=%04X seq=%u err=%d\n", nodeId, seq, (int)cr);
         return;
     }
     onDecryptedPkt(nodeId, (PacketType)pktType, pt, ctLen, seq);
 }
 
+static uint32_t lastAutoCmdMs = 0;
 static void checkAutoControl(float moisturePct) {
+    uint32_t now = millis();
+    if (now - lastAutoCmdMs < 10000) return;
     for (int i = 0; i < nodeMgr.count(); i++) {
         const NodeInfo* ni = nodeMgr.getNode(i);
         if (!ni || ni->type != 0x02 || !ni->autoMode) continue;
         bool shouldOpen = moisturePct < ni->threshold;
         if (shouldOpen == ni->valveOpen) continue;
+        lastAutoCmdMs = now;
         onActuatorToggle(ni->id, shouldOpen);
         dashboard.pushLog("info", (String("Auto ") + (shouldOpen ? "OPEN" : "CLOSE") +
                           " actuator 0x" + String(ni->id, HEX) +
@@ -187,30 +185,58 @@ void onDecryptedPkt(uint16_t nodeId, PacketType type,
 
     switch (type) {
         case PacketType::SENSOR_TELEMETRY: {
-            if (len < sizeof(SensorTelemetry)) break;
-            auto* st = (const SensorTelemetry*)pt;
-            float mp = st->moisture_pct;
-            float tc = st->temperature_c / 100.0f;
-            float bv = st->battery_mv / 1000.0f;
+            if (len < 12) break;
+            SensorTelemetry st;
+            deserializeTelemetry(pt, st);
+            float mp = st.moisture_pct;
+            float tc = st.temperature_c / 100.0f;
+            float bv = st.battery_mv / 1000.0f;
 
             String t = MqttTopics::sensorTelemetry(nodeId).c_str();
-            String p = MqttTopics::jsonTelemetry(st->sequence, mp, tc, bv, st->error_flags).c_str();
+            String p = MqttTopics::jsonTelemetry(st.sequence, mp, tc, bv, st.error_flags).c_str();
             mqttBroker.publish(t, p);
 
             SensorTelemetryData d;
             d.node_id = nodeId; d.moisture_percent = mp; d.temperature_c = tc;
-            d.battery_v = bv; d.sequence = st->sequence; d.rssi = 0; d.timestamp = millis();
+            d.battery_v = bv; d.sequence = st.sequence; d.rssi = 0; d.timestamp = millis();
             dashboard.pushSensorTelemetry(d);
 
             checkAutoControl(mp);
             break;
         }
         case PacketType::ACK: {
-            if (len < sizeof(AckPayload)) break;
-            auto* ack = (const AckPayload*)pt;
+            if (len < 7) break;
+            AckPayload ack;
+            deserializeAck(pt, ack);
             String t = MqttTopics::actuatorAck(nodeId).c_str();
-            String p = MqttTopics::jsonAck(ack->ack_seq, ack->result == 0, ack->battery_mv / 1000.0f).c_str();
+            String p = MqttTopics::jsonAck(ack.ack_seq, ack.result == 0, ack.battery_mv / 1000.0f).c_str();
             mqttBroker.publish(t, p);
+            for (int i = 0; i < nodeMgr.count(); i++) {
+                const NodeInfo* ni = nodeMgr.getNode(i);
+                if (ni && ni->id == nodeId) {
+                    ActuatorStateData asd;
+                    asd.node_id = nodeId;
+                    asd.valve_open = ni->valveOpen;
+                    asd.battery_v = ack.battery_mv / 1000.0f;
+                    asd.timestamp = millis();
+                    dashboard.pushActuatorState(asd);
+                    break;
+                }
+            }
+            break;
+        }
+        case PacketType::HEARTBEAT: {
+            if (len < 7) break;
+            HeartbeatPayload hb;
+            deserializeHeartbeat(pt, hb);
+            ActuatorStateData asd;
+            asd.node_id = nodeId;
+            asd.valve_open = hb.valve_state;
+            asd.battery_v = hb.battery_mv / 1000.0f;
+            asd.timestamp = millis();
+            dashboard.pushActuatorState(asd);
+            Serial.printf("[GW] HB node=%04X batt=%.2f valve=%s\n",
+                          nodeId, asd.battery_v, asd.valve_open ? "OPEN" : "CLOSED");
             break;
         }
         default: break;
@@ -238,37 +264,72 @@ void onActuatorConfig(uint16_t nodeId, bool autoMode, uint8_t threshold, uint16_
     }
 }
 
+// Use startTransmit (sets up FIFO, enters TX mode) then poll IRQ flags register for TxDone
+// This bypasses DIO0 polling which fails on boards where DIO0 conflicts with PSRAM
+static int manualTransmit(SX1276& radio, uint8_t* data, size_t len) {
+    int st = radio.startTransmit(data, len);
+    if (st != 0) { Serial.printf("[GW] startTransmit fail: %d\n", st); return st; }
+    uint32_t start = millis();
+    while (millis() - start < 2000) {
+        uint16_t irq = radio.getIRQFlags();
+        if (irq & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_TX_DONE) {
+            radio.standby();
+            return 0;
+        }
+        delay(1);
+    }
+    radio.standby();
+    return -5;
+}
+
 void onActuatorToggle(uint16_t nodeId, bool on) {
     Serial.printf("[GW] Toggle actuator %04X -> %s\n", nodeId, on ? "ON" : "OFF");
     nodeMgr.setValveState(nodeId, on);
+
     ActuatorCommand cmd;
-    cmd.sequence = downlinkSeq++;
-    cmd.command = 0x01; cmd.value = on ? 1 : 0; cmd.timeout_s = 0;
+    cmd.sequence  = downlinkSeq++;
+    cmd.command   = 0x01;
+    cmd.value     = on ? 1 : 0;
+    cmd.timeout_s = 0;
 
-    uint8_t pt[sizeof(cmd)];
-    memcpy(pt, &cmd, sizeof(cmd));
+    uint8_t pt[COMMAND_WIRE_SIZE];
+    serializeCommand(pt, cmd);
 
-    uint8_t sk[16];
-    CryptoEngine::deriveSessionKey(GW_PSK, nodeId, sk);
-    CryptoEngine enc;
-    if (!enc.begin(sk, 16)) return;
+    Serial.printf("[GW] cmd seq=%u\n", cmd.sequence);
 
-    LoraFrame f;
-    f.ciphertext_len = sizeof(cmd);
-    f.node_id[0] = nodeId >> 8; f.node_id[1] = nodeId & 0xFF;
-    f.pkt_type = (uint8_t)PacketType::ACTUATOR_COMMAND;
+    const uint8_t* nodePsk = nodeMgr.getPsk(nodeId);
+    if (!nodePsk) { Serial.printf("[GW] No PSK for node %04X\n", nodeId); return; }
 
-    if (!enc.encrypt(pt, sizeof(cmd), (uint8_t)PacketType::ACTUATOR_COMMAND,
-                      cmd.sequence, nodeId, f)) return;
+    LoraCrypto enc;
+    enc.setKey(nodePsk, 16);
+    uint8_t iv[GCM_IV_SIZE], mic[MIC_SIZE];
+    CryptoResult cr = enc.encrypt(pt, COMMAND_WIRE_SIZE,
+                                   (uint8_t)PacketType::ACTUATOR_COMMAND,
+                                   cmd.sequence, nodeId, iv, mic);
+    if (cr != CryptoResult::OK) {
+        Serial.printf("[GW] encrypt fail err=%d\n", (int)cr);
+        return;
+    }
 
     uint8_t tx[LORA_MAX_PAYLOAD]; size_t o = 0;
-    memcpy(tx+o, f.node_id, 2); o+=2;
-    memcpy(tx+o, f.iv, 12);     o+=12;
-    tx[o++] = f.pkt_type;
-    memcpy(tx+o, pt, sizeof(cmd)); o+=sizeof(cmd);
-    memcpy(tx+o, f.mic, 4); o+=4;
+    uint8_t node_be[2] = { uint8_t(nodeId >> 8), uint8_t(nodeId & 0xFF) };
+    memcpy(tx+o, node_be, 2); o+=2;
+    memcpy(tx+o, iv, 12);     o+=12;
+    tx[o++] = (uint8_t)PacketType::ACTUATOR_COMMAND;
+    memcpy(tx+o, pt, COMMAND_WIRE_SIZE); o+=COMMAND_WIRE_SIZE;
+    memcpy(tx+o, mic, MIC_SIZE);         o+=MIC_SIZE;
+    Serial.printf("[GW] Tx pkt: %u bytes (wire ct=%u)\n", (unsigned)o, (unsigned)COMMAND_WIRE_SIZE);
 
-    radio.transmit(tx, o);
+    radio.standby();
+    delay(100);
+    radio.setFrequency(LORA_FREQ); delay(100);
+    int tr = manualTransmit(radio, tx, o);
+    Serial.printf("[GW] Tx seq=%u: ret=%d\n", cmd.sequence, tr);
+    if (tr != 0) {
+        delay(200);
+        tr = manualTransmit(radio, tx, o);
+        Serial.printf("[GW] Tx seq=%u retry: ret=%d\n", cmd.sequence, tr);
+    }
     radio.startReceive();
 }
 
@@ -285,11 +346,14 @@ void initLoRa() {
 #else
     SPI.begin(12, 13, 11, LORA_NSS);
 #endif
-    int st = radio.begin(LORA_FREQ, 125.0f, 9, 5, 0x12, 10, 8);
-    if (st != 0) {
-        Serial.printf("[GW] LoRa error: %d\n", st);
-        return;
-    }
+    int st = radio.begin(LORA_FREQ, 125.0f, 9, 5, 0x12, 10, 12);
+    Serial.printf("[GW] LoRa begin=%d chipver=0x%02X\n", st, radio.getChipVersion());
+    if (st != 0) { return; }
+    uint8_t warmup[2] = {0};
+    int tst = manualTransmit(radio, warmup, 2);
+    Serial.printf("[GW] warmup Tx: ret=%d\n", tst);
+    tst = manualTransmit(radio, warmup, 2);
+    Serial.printf("[GW] warmup2 Tx: ret=%d\n", tst);
     st = radio.startReceive();
     if (st == 0) { Serial.println("[GW] LoRa ready @ 868 MHz"); } else { Serial.println("[GW] Rx start fail"); }
 }

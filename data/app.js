@@ -114,6 +114,7 @@ function drawChart(id,data){
 
 const actuatorCards={};
 function updateActuator(a){
+  sensorLastSeen[a.id]=Date.now();
   const c=document.getElementById('actuator-cards');
   let card=actuatorCards[a.id];
   if(!card){
@@ -158,7 +159,9 @@ function setAutoCfg(id){
   ws.send(JSON.stringify({action:'set_actuator_config',node_id:id,auto_mode:auto,threshold:thr,sensor_id:sid}));
 }
 function toggleAct(id){
-  fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node_id:id,value:true})});
+  const btn = document.getElementById('abtn-'+id);
+  const isOpen = btn && btn.textContent === 'Turn OFF';
+  fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({node_id:id,value:!isOpen})});
   showToast('Toggle command sent to actuator 0x'+id.toString(16).padStart(4,'0'),'info');
 }
 function provisionDone(m){
@@ -169,12 +172,14 @@ function provisionDone(m){
   fetchNodes();
 }
 async function fetchNodes(){
-  try{const r=await fetch('/api/nodes');const nodes=await r.json();renderNodes(nodes)}catch(ex){console.error(ex)}
+  try{const r=await fetch('/api/nodes');const nodes=await r.json();renderNodes(nodes);
+    nodes.forEach(n=>{if(n.type===2&&!actuatorCards[n.id])updateActuator({id:n.id,valve:false,batt:0})});
+  }catch(ex){console.error(ex)}
 }
 function nodeStatus(id){
   const last=sensorLastSeen[id];if(!last)return'○ Offline';
   const ago=(Date.now()-last)/1000;
-  return ago<600?'● Online':'○ Offline';
+  return ago<20?'● Online':'○ Offline';
 }
 function updateNodeStatuses(){
   const t=document.getElementById('nodes-tbody');
@@ -186,8 +191,8 @@ function updateNodeStatuses(){
       const last=sensorLastSeen[id];
       if(!last){st.textContent='○ Offline';st.className='node-offline';continue}
       const ago=(Date.now()-last)/1000;
-      st.textContent=ago<600?'● Online':'○ Offline';
-      st.className=ago<600?'node-online':'node-offline';
+      st.textContent=ago<20?'● Online':'○ Offline';
+      st.className=ago<20?'node-online':'node-offline';
     }
   }
 }

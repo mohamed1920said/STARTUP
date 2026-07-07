@@ -3,8 +3,7 @@
 #include <RadioLib.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
-#include <PacketTypes.h>
-#include <CryptoEngine.h>
+#include <LoraProtocol.h>
 
 const uint16_t NODE_ID      = 0x0001;
 const uint8_t  NODE_PSK[16] = {0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,
@@ -60,29 +59,28 @@ bool sendTelemetry() {
     payload.battery_mv    = (uint16_t)(battV * 1000);
     payload.error_flags   = err;
 
-    CryptoEngine crypto;
-    crypto.begin(NODE_PSK, 16);
+    uint8_t pt[TELEMETRY_WIRE_SIZE];
+    serializeTelemetry(pt, payload);
 
-    uint8_t pt[sizeof(payload)];
-    memcpy(pt, &payload, sizeof(payload));
+    LoraCrypto crypto;
+    crypto.setKey(NODE_PSK, 16);
 
-    LoraFrame frame;
-    frame.ciphertext_len = sizeof(payload);
-    frame.node_id[0] = NODE_ID >> 8; frame.node_id[1] = NODE_ID & 0xFF;
-    frame.pkt_type = (uint8_t)PacketType::SENSOR_TELEMETRY;
-
-    if (!crypto.encrypt(pt, sizeof(payload), (uint8_t)PacketType::SENSOR_TELEMETRY,
-                         seqCounter, NODE_ID, frame)) {
-        Serial.println(F("[SN] Encrypt failed"));
+    uint8_t iv[GCM_IV_SIZE], mic[MIC_SIZE];
+    CryptoResult cr = crypto.encrypt(pt, TELEMETRY_WIRE_SIZE,
+                                      (uint8_t)PacketType::SENSOR_TELEMETRY,
+                                      seqCounter, NODE_ID, iv, mic);
+    if (cr != CryptoResult::OK) {
+        Serial.printf("[SN] Encrypt failed err=%d\n", (int)cr);
         return false;
     }
 
     uint8_t tx[LORA_MAX_PAYLOAD]; size_t o = 0;
-    memcpy(tx+o, frame.node_id, 2); o+=2;
-    memcpy(tx+o, frame.iv, 12);     o+=12;
-    tx[o++] = frame.pkt_type;
-    memcpy(tx+o, pt, sizeof(payload)); o+=sizeof(payload);
-    memcpy(tx+o, frame.mic, 4);        o+=4;
+    uint8_t node_be[2] = { uint8_t(NODE_ID >> 8), uint8_t(NODE_ID & 0xFF) };
+    memcpy(tx+o, node_be, 2); o+=2;
+    memcpy(tx+o, iv, 12);     o+=12;
+    tx[o++] = (uint8_t)PacketType::SENSOR_TELEMETRY;
+    memcpy(tx+o, pt, TELEMETRY_WIRE_SIZE); o+=TELEMETRY_WIRE_SIZE;
+    memcpy(tx+o, mic, MIC_SIZE);           o+=MIC_SIZE;
 
     int st = radio.transmit(tx, o);
     Serial.printf("[SN] Tx %u bytes -> %s\n", o, st == RADIOLIB_ERR_NONE ? "OK" : "FAIL");

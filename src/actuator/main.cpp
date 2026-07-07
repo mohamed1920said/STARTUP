@@ -1,8 +1,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <RadioLib.h>
-#include <PacketTypes.h>
-#include <CryptoEngine.h>
+#include <LoraProtocol.h>
 
 const uint16_t NODE_ID      = 0x0002;
 const uint8_t  NODE_PSK[16] = {0xAA,0xBB,0xCC,0xDD,0xEE,0xFF,0x00,0x11,
@@ -13,13 +12,13 @@ const uint8_t  PIN_RST = 14;
 Module loraMod(LORA_CS, LORA_IRQ, PIN_RST, RADIOLIB_NC);
 SX1276 radio(&loraMod);
 
-const uint8_t AIN1 = 2;
-const uint8_t AIN2 = 4;
-const uint8_t PWMA = 23;
-const uint8_t STBY = 17;
+const uint8_t AIN1 = 2, AIN2 = 4, PWMA = 23, STBY = 17;
 const uint8_t VALVE_FB_PIN = 3;
 const uint32_t VALVE_PULSE_MS = 30;
 bool valveOpen = false;
+const uint32_t HEARTBEAT_INTERVAL = 30000;
+uint32_t lastHbMs = 0;
+uint32_t hbSeqCounter = 1;
 
 void valveSet(bool open) {
     digitalWrite(STBY, HIGH);
@@ -34,9 +33,6 @@ void valveSet(bool open) {
     valveOpen = open;
 }
 
-const uint32_t LISTEN_INTERVAL_MS = 15000;
-const uint32_t RX_TIMEOUT_MS      = 3000;
-uint32_t lastListenMs = 0;
 uint32_t lastSeq = 0;
 uint32_t ackSeqCounter = 1;
 
@@ -48,8 +44,61 @@ float readBattery() {
 }
 
 void sendAck(uint32_t ackSeq);
+void sendHeartbeat();
 
-void listenForCommand();
+void processPacket() {
+    uint8_t buf[LORA_MAX_PAYLOAD];
+    size_t len = radio.getPacketLength();
+    if (len < LORA_HEADER_SIZE + MIC_SIZE || len > sizeof(buf)) return;
+    int st = radio.readData(buf, len);
+    if (st != RADIOLIB_ERR_NONE) return;
+
+    uint16_t target = (buf[0] << 8) | buf[1];
+    Serial.printf("[AN] Rx %u bytes target=%04X RSSI=%.1f\n", len, target, radio.getRSSI());
+    if (target != NODE_ID) return;
+
+    uint8_t pktType = buf[NODE_ID_SIZE + IV_NONCE_SIZE];
+    uint32_t seq = 0;
+    for (int i = 0; i < 8; i++) seq = (seq << 8) | buf[NODE_ID_SIZE + 4 + i];
+    size_t ctLen = len - LORA_HEADER_SIZE - MIC_SIZE;
+
+    Serial.printf("[AN] pktType=0x%02X seq=%u ctLen=%u\n", pktType, seq, (unsigned)ctLen);
+
+    if (ctLen < COMMAND_WIRE_SIZE) {
+        Serial.printf("[AN] ctLen %u < COMMAND_WIRE_SIZE %u\n", (unsigned)ctLen, (unsigned)COMMAND_WIRE_SIZE);
+        return;
+    }
+
+    const uint8_t* iv = buf + NODE_ID_SIZE;
+    const uint8_t* ct = buf + LORA_HEADER_SIZE;
+    const uint8_t* mic = ct + ctLen;
+
+    uint8_t pt[LORA_MAX_CIPHERTEXT];
+    memcpy(pt, ct, ctLen);
+
+    LoraCrypto crypto;
+    crypto.setKey(NODE_PSK, 16);
+    CryptoResult cr = crypto.decrypt(pt, ctLen, pktType, seq, NODE_ID, iv, mic);
+    if (cr != CryptoResult::OK) {
+        Serial.printf("[AN] DECRYPT_FAIL err=%d seq=%u pktType=0x%02X ctLen=%u\n",
+                      (int)cr, seq, pktType, (unsigned)ctLen);
+        return;
+    }
+
+    if (seq <= lastSeq) { Serial.printf("[AN] Replay %u (last=%u)\n", seq, lastSeq); return; }
+    lastSeq = seq;
+
+    ActuatorCommand cmd;
+    deserializeCommand(pt, cmd);
+    Serial.printf("[AN] cmd: seq=%u cmd=0x%02X val=%u timeout=%u\n",
+                  cmd.sequence, cmd.command, cmd.value, cmd.timeout_s);
+
+    if (cmd.command == 0x01) {
+        valveSet(cmd.value != 0);
+        Serial.printf("[AN] Valve -> %s\n", valveOpen ? "OPEN" : "CLOSED");
+        sendAck(cmd.sequence);
+    }
+}
 
 void setup() {
     Serial.begin(115200); delay(100);
@@ -63,87 +112,62 @@ void setup() {
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
     int st = radio.begin(LORA_FREQ, 125.0f, 9, 5,
-                          RADIOLIB_SX127X_SYNC_WORD, 10, 8);
+                          RADIOLIB_SX127X_SYNC_WORD, 10, 12);
     if (st != RADIOLIB_ERR_NONE) {
         Serial.printf("[AN] LoRa error: %d\n", st);
     } else {
         Serial.println(F("[AN] LoRa ready"));
+        radio.startReceive();
+        sendHeartbeat();
+        lastHbMs = millis();
     }
 }
 
 void loop() {
-    uint32_t now = millis();
-    if (now - lastListenMs >= LISTEN_INTERVAL_MS) {
-        lastListenMs = now;
-        listenForCommand();
+    uint16_t irqFlags = radio.getIRQFlags();
+    if ((irqFlags & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE) && radio.getPacketLength() > 0) {
+        processPacket();
+        radio.startReceive();
     }
-    delay(100);
+    uint32_t now = millis();
+    if (now - lastHbMs >= HEARTBEAT_INTERVAL) {
+        lastHbMs = now;
+        sendHeartbeat();
+        radio.startReceive();
+    }
+    delay(10);
 }
 
-void listenForCommand() {
-    int cad = radio.scanChannel();
-    if (cad != RADIOLIB_PREAMBLE_DETECTED) return;
+void sendHeartbeat() {
+    HeartbeatPayload hb;
+    hb.sequence    = hbSeqCounter++;
+    hb.battery_mv  = (uint16_t)(readBattery() * 1000);
+    hb.valve_state = valveOpen ? 1 : 0;
 
-    Serial.println(F("[AN] CAD detected - opening Rx window"));
+    uint8_t pt[HEARTBEAT_WIRE_SIZE];
+    serializeHeartbeat(pt, hb);
 
-    uint8_t buf[LORA_MAX_PAYLOAD];
-    int st = radio.startReceive();
-    if (st != RADIOLIB_ERR_NONE) return;
+    LoraCrypto crypto;
+    crypto.setKey(NODE_PSK, 16);
 
-    uint32_t t0 = millis(); bool got = false;
-    size_t len = 0;
-    while (millis() - t0 < RX_TIMEOUT_MS) {
-        len = radio.getPacketLength();
-        if (len > 0) {
-            if (len > sizeof(buf)) { len = sizeof(buf); }
-            st = radio.readData(buf, len);
-            if (st == RADIOLIB_ERR_NONE) { got = true; break; }
-        }
-        delay(10);
-    }
-    if (!got) { Serial.println(F("[AN] Rx timeout")); return; }
+    uint8_t iv[GCM_IV_SIZE], mic[MIC_SIZE];
+    CryptoResult cr = crypto.encrypt(pt, HEARTBEAT_WIRE_SIZE,
+                                      (uint8_t)PacketType::HEARTBEAT,
+                                      hb.sequence, NODE_ID, iv, mic);
+    if (cr != CryptoResult::OK) { Serial.printf("[AN] HB encrypt err=%d\n", (int)cr); return; }
 
-    Serial.printf("[AN] Rx %u bytes, RSSI=%.1f\n", len, radio.getRSSI());
+    uint8_t tx[LORA_MAX_PAYLOAD]; size_t o = 0;
+    uint8_t node_be[2] = { uint8_t(NODE_ID >> 8), uint8_t(NODE_ID & 0xFF) };
+    memcpy(tx+o, node_be, 2); o+=2;
+    memcpy(tx+o, iv, 12);     o+=12;
+    tx[o++] = (uint8_t)PacketType::HEARTBEAT;
+    memcpy(tx+o, pt, HEARTBEAT_WIRE_SIZE); o+=HEARTBEAT_WIRE_SIZE;
+    memcpy(tx+o, mic, MIC_SIZE);           o+=MIC_SIZE;
 
-    if (len < LORA_HEADER_SIZE + MIC_SIZE) return;
-    uint16_t target = (buf[0] << 8) | buf[1];
-    if (target != NODE_ID) { Serial.printf("[AN] Not for us (%04X)\n", target); return; }
-
-    uint8_t pktType = buf[NODE_ID_SIZE + IV_NONCE_SIZE];
-    uint32_t seq = 0;
-    for (int i = 0; i < 8; i++) seq = (seq << 8) | buf[NODE_ID_SIZE + 4 + i];
-    if (seq <= lastSeq) { Serial.printf("[AN] Replay %u\n", seq); return; }
-
-    size_t ctLen = len - LORA_HEADER_SIZE - MIC_SIZE;
-    if (ctLen < sizeof(ActuatorCommand)) return;
-
-    LoraFrame frame;
-    memcpy(frame.node_id, buf, 2);
-    memcpy(frame.iv, buf + 2, 12);
-    frame.pkt_type = pktType;
-    memcpy(frame.ciphertext, buf + LORA_HEADER_SIZE, ctLen);
-    memcpy(frame.mic, buf + LORA_HEADER_SIZE + ctLen, 4);
-    frame.ciphertext_len = ctLen;
-
-    uint8_t sk[16];
-    CryptoEngine::deriveSessionKey(NODE_PSK, NODE_ID, sk);
-    CryptoEngine crypto;
-    if (!crypto.begin(sk, 16)) return;
-
-    uint8_t pt[LORA_MAX_CIPHERTEXT];
-    memcpy(pt, frame.ciphertext, ctLen);
-    if (!crypto.decrypt(pt, ctLen, pktType, seq, NODE_ID, frame)) {
-        Serial.println(F("[AN] Decrypt/MIC fail")); return;
-    }
-
-    lastSeq = seq;
-
-    ActuatorCommand* cmd = (ActuatorCommand*)pt;
-    if (cmd->command == 0x01) {
-        valveSet(cmd->value != 0);
-        Serial.printf("[AN] Valve -> %s\n", valveOpen ? "OPEN" : "CLOSED");
-        sendAck(cmd->sequence);
-    }
+    int st = radio.standby(); if (st != 0) return;
+    radio.setFrequency(LORA_FREQ);
+    st = radio.transmit(tx, o);
+    Serial.printf("[AN] HB seq=%u -> %s\n", hb.sequence, st == RADIOLIB_ERR_NONE ? "OK" : "FAIL");
 }
 
 void sendAck(uint32_t ackSeq) {
@@ -152,29 +176,28 @@ void sendAck(uint32_t ackSeq) {
     ack.result     = 0x00;
     ack.battery_mv = (uint16_t)(readBattery() * 1000);
 
-    uint8_t sk[16];
-    CryptoEngine::deriveSessionKey(NODE_PSK, NODE_ID, sk);
-    CryptoEngine crypto;
-    if (!crypto.begin(sk, 16)) return;
+    uint8_t pt[ACK_WIRE_SIZE];
+    serializeAck(pt, ack);
 
-    uint8_t pt[sizeof(ack)];
-    memcpy(pt, &ack, sizeof(ack));
+    LoraCrypto crypto;
+    crypto.setKey(NODE_PSK, 16);
 
-    LoraFrame f;
-    f.ciphertext_len = sizeof(ack);
-    f.node_id[0] = NODE_ID >> 8; f.node_id[1] = NODE_ID & 0xFF;
-    f.pkt_type = (uint8_t)PacketType::ACK;
-
-    if (!crypto.encrypt(pt, sizeof(ack), (uint8_t)PacketType::ACK,
-                         ackSeqCounter++, NODE_ID, f)) return;
+    uint8_t iv[GCM_IV_SIZE], mic[MIC_SIZE];
+    CryptoResult cr = crypto.encrypt(pt, ACK_WIRE_SIZE,
+                                      (uint8_t)PacketType::ACK,
+                                      ackSeqCounter++, NODE_ID, iv, mic);
+    if (cr != CryptoResult::OK) { Serial.printf("[AN] ACK encrypt err=%d\n", (int)cr); return; }
 
     uint8_t tx[LORA_MAX_PAYLOAD]; size_t o = 0;
-    memcpy(tx+o, f.node_id, 2); o+=2;
-    memcpy(tx+o, f.iv, 12);     o+=12;
-    tx[o++] = f.pkt_type;
-    memcpy(tx+o, pt, sizeof(ack)); o+=sizeof(ack);
-    memcpy(tx+o, f.mic, 4);       o+=4;
+    uint8_t node_be[2] = { uint8_t(NODE_ID >> 8), uint8_t(NODE_ID & 0xFF) };
+    memcpy(tx+o, node_be, 2); o+=2;
+    memcpy(tx+o, iv, 12);     o+=12;
+    tx[o++] = (uint8_t)PacketType::ACK;
+    memcpy(tx+o, pt, ACK_WIRE_SIZE); o+=ACK_WIRE_SIZE;
+    memcpy(tx+o, mic, MIC_SIZE);     o+=MIC_SIZE;
 
-    int st = radio.transmit(tx, o);
+    int st = radio.standby(); if (st != 0) return;
+    radio.setFrequency(LORA_FREQ);
+    st = radio.transmit(tx, o);
     Serial.printf("[AN] ACK seq=%u -> %s\n", ackSeq, st == RADIOLIB_ERR_NONE ? "OK" : "FAIL");
 }
