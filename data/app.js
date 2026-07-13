@@ -121,6 +121,7 @@ function drawChart(id,data){
 }
 
 const actuatorCards={};
+let cachedNodes=[];
 function updateActuator(a){
   sensorLastSeen[a.id]=Date.now();
   const c=document.getElementById('actuator-cards');
@@ -149,23 +150,21 @@ function updateActuator(a){
   const btn=document.getElementById('abtn-'+a.id);
   btn.textContent=a.valve?'Turn OFF':'Turn ON';
   btn.className='toggle-btn '+(a.valve?'on':'off');
-  fetch('/api/nodes').then(r=>r.json()).then(nodes=>{
-    const n=nodes.find(x=>x.id===a.id);
-    if(n){
-      document.getElementById('auto-cb-'+a.id).checked=n.autoMode;
-      document.getElementById('auto-prm-'+a.id).style.display=n.autoMode?'block':'none';
-      document.getElementById('athr-'+a.id).value=n.threshold;
-      document.getElementById('athr-val-'+a.id).textContent=n.threshold;
-      document.getElementById('asid-'+a.id).value='0x'+n.sensorId.toString(16).padStart(4,'0');
-    }
-  }).catch(()=>{});
+  const n=cachedNodes.find(x=>x.id===a.id);
+  if(n){
+    document.getElementById('auto-cb-'+a.id).checked=n.autoMode;
+    document.getElementById('auto-prm-'+a.id).style.display=n.autoMode?'block':'none';
+    document.getElementById('athr-'+a.id).value=n.threshold;
+    document.getElementById('athr-val-'+a.id).textContent=n.threshold;
+    document.getElementById('asid-'+a.id).value='0x'+n.sensorId.toString(16).padStart(4,'0');
+  }
 }
 function setAutoCfg(id){
   const auto=document.getElementById('auto-cb-'+id).checked;
   document.getElementById('auto-prm-'+id).style.display=auto?'block':'none';
   const thr=parseInt(document.getElementById('athr-'+id).value);
   const sid=parseInt(document.getElementById('asid-'+id).value,16)||0;
-  ws.send(JSON.stringify({action:'set_actuator_config',node_id:id,auto_mode:auto,threshold:thr,sensor_id:sid}));
+  if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'set_actuator_config',node_id:id,auto_mode:auto,threshold:thr,sensor_id:sid}));
 }
 function toggleAct(id){
   const btn = document.getElementById('abtn-'+id);
@@ -181,8 +180,8 @@ function provisionDone(m){
   fetchNodes();
 }
 async function fetchNodes(){
-  try{const r=await fetch('/api/nodes');const nodes=await r.json();renderNodes(nodes);
-    nodes.forEach(n=>{if(n.type===2&&!actuatorCards[n.id])updateActuator({id:n.id,valve:false,batt:0})});
+  try{const r=await fetch('/api/nodes');cachedNodes=await r.json();renderNodes(cachedNodes);
+    cachedNodes.forEach(n=>{if(n.type===2&&!actuatorCards[n.id])updateActuator({id:n.id,valve:false,batt:0})});
   }catch(ex){console.error(ex)}
 }
 function nodeStatus(id){
@@ -207,7 +206,7 @@ function updateNodeStatuses(){
 }
 function removeNode(id){
   if(!confirm('Remove node 0x'+id.toString(16).padStart(4,'0')+'?'))return;
-  ws.send(JSON.stringify({action:'remove_node',node_id:id}));
+  if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'remove_node',node_id:id}));
   showToast('Removing node 0x'+id.toString(16).padStart(4,'0'),'warn');
 }
 function renderNodes(nodes){
@@ -235,7 +234,7 @@ document.getElementById('provision-form').addEventListener('submit',e=>{
   const type=document.getElementById('p-type').value;
   const alias=document.getElementById('p-alias').value.trim()||'unnamed';
   if(!id||isNaN(id)||psk.length!==32){showToast('Invalid node ID or PSK (need 32 hex chars)','error');return;}
-  ws.send(JSON.stringify({action:'add_node',node_id:id,psk:psk,node_type:type,alias:alias}));
+  if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'add_node',node_id:id,psk:psk,node_type:type,alias:alias}));
   document.getElementById('provision-status').textContent='Sending provisioning request for node 0x'+id.toString(16).padStart(4,'0')+'...';
   showToast('Provisioning node 0x'+id.toString(16).padStart(4,'0')+'...','info');
 });
@@ -300,9 +299,9 @@ async function pollHealth(){
 }
 document.addEventListener('DOMContentLoaded',()=>{
   connectWS();
-  setInterval(pollHealth,15000);
-  setInterval(fetchNodes,10000);
-  setInterval(updateNodeStatuses,5000);
+  setInterval(pollHealth,30000);
+  setInterval(fetchNodes,15000);
+  setInterval(updateNodeStatuses,10000);
   setInterval(updateClock,1000);
   fetchNodes();updateClock();fetchCloudCfg();
 });

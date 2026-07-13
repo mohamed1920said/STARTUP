@@ -41,10 +41,30 @@ public:
         return 0;
     }
 
+    int startTransmit(uint8_t* buf, size_t len) {
+        LoRa.beginPacket();
+        LoRa.write(buf, len);
+        return LoRa.endPacket(true) ? 0 : -1;
+    }
+
+    uint16_t getIRQFlags() {
+        return 0;
+    }
+
+    void standby() {}
+
+    uint8_t getChipVersion() {
+        return 0;
+    }
+
     int transmit(uint8_t* buf, size_t len) {
         LoRa.beginPacket();
         LoRa.write(buf, len);
         return LoRa.endPacket(false) ? 0 : -1;
+    }
+
+    float getLastRssi() {
+        return LoRa.packetRssi();
     }
 
 private:

@@ -18,9 +18,16 @@
 
 const float    LORA_FREQ  = 868.0f;
 const float    MOISTURE_DRY_OFFSET = 6.0f;
-const uint32_t WEATHER_INTERVAL_MS = 30000;  // must match WIND_INTERVAL_S in WeatherStation.h
+const uint32_t WEATHER_INTERVAL_MS = 30000;
 #ifdef TTGO_GATEWAY
 const uint8_t  PIN_LORA_RST = 14;
+#ifndef LORA_CS
+#define LORA_CS   18
+#define LORA_IRQ  26
+#define LORA_SCK  5
+#define LORA_MISO 19
+#define LORA_MOSI 27
+#endif
 #else
 const uint8_t  LORA_NSS = 18, LORA_DIO0 = 2, LORA_RST = 14;
 const uint8_t  RAIN_PIN = 6, WIND_PIN = 3, VANE_PIN = 10;
@@ -32,8 +39,8 @@ const uint16_t GW_NODE_ID = 0x0000;
 const uint8_t  GW_PSK[16] = {0};
 
 #ifndef TTGO_GATEWAY
-Module* loraMod = new Module(LORA_NSS, LORA_DIO0, LORA_RST, RADIOLIB_NC);
-SX1276 radio(loraMod);
+Module loraMod(LORA_NSS, LORA_DIO0, LORA_RST, RADIOLIB_NC);
+SX1276 radio(&loraMod);
 #else
 LoraRadio radio(LORA_CS, LORA_IRQ, PIN_LORA_RST);
 #endif
@@ -50,7 +57,7 @@ WiFiManager wifiManager;
 uint32_t downlinkSeq = 0x80000000;
 QueueHandle_t loraTxQueue = NULL;
 QueueHandle_t cloudReqQueue = NULL;
-bool loraReady = false;
+volatile bool loraReady = false;
 
 struct LoraTxItem {
     uint8_t data[LORA_MAX_PAYLOAD];
@@ -59,10 +66,10 @@ struct LoraTxItem {
 
 enum class CloudReqType { TELEMETRY, WEATHER, HEARTBEAT, REGISTER, ACK };
 
-struct CloudReq {
+struct alignas(4) CloudReq {
     CloudReqType type;
     uint16_t nodeId;
-    float f1, f2, f3;
+    float f1, f2, f3, f4;
     uint32_t seq;
     uint8_t flags;
     uint8_t rssi;
@@ -85,15 +92,24 @@ void queueCloudAck(uint32_t cmdId, bool ok, float bv);
 void loraTask(void* pv);
 void cloudTask(void* pv);
 
-static int manualTransmit(SX1276& r, uint8_t* data, size_t len) {
-    int st = r.startTransmit(data, len);
-    if (st != 0) { Serial.printf("[GW] startTransmit fail: %d\n", st); return st; }
+static int transmitLoRa(uint8_t* data, size_t len) {
+#ifndef TTGO_GATEWAY
+    int st = radio.startTransmit(data, len);
+    if (st != 0) return st;
     uint32_t start = millis();
     while (millis() - start < 2000) {
-        if (r.getIRQFlags() & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_TX_DONE) { r.standby(); return 0; }
-        delay(1);
+        if (radio.getIRQFlags() & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_TX_DONE) {
+            radio.standby();
+            return 0;
+        }
+        delay(0);
     }
-    r.standby(); return -5;
+    radio.standby();
+    return -5;
+#else
+    radio.standby();
+    return radio.transmit(data, len) ? 0 : -1;
+#endif
 }
 
 void loraTask(void* pv) {
@@ -105,23 +121,41 @@ void loraTask(void* pv) {
         if (xQueueReceive(loraTxQueue, &txItem, 0) == pdTRUE) {
             if (loraReady) {
                 radio.standby();
-                delay(100);
-                radio.setFrequency(LORA_FREQ); delay(100);
-                int tr = manualTransmit(radio, txItem.data, txItem.len);
+                int tr = transmitLoRa(txItem.data, txItem.len);
                 Serial.printf("[GW] LoraTask Tx: ret=%d\n", tr);
-                if (tr != 0) { delay(200); manualTransmit(radio, txItem.data, txItem.len); }
                 radio.startReceive();
             }
+            continue;
         }
 
-        if (loraReady && (radio.getIRQFlags() & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE)) {
-            len = radio.getPacketLength();
-            if (len >= LORA_HEADER_SIZE + MIC_SIZE && len <= sizeof(buf)) {
-                if (radio.readData(buf, len) == 0) { processLoRaPacket(buf, len); }
+        if (loraReady) {
+#ifndef TTGO_GATEWAY
+            uint16_t flags = radio.getIRQFlags();
+            if (flags & RADIOLIB_SX127X_CLEAR_IRQ_FLAG_RX_DONE) {
+                len = radio.getPacketLength();
+                if (len >= LORA_HEADER_SIZE + MIC_SIZE && len <= sizeof(buf)) {
+                    if (radio.readData(buf, len) == 0) {
+                        processLoRaPacket(buf, len);
+                    }
+                }
+                radio.startReceive();
+                continue;
             }
-            radio.startReceive();
+#else
+            if (radio.available()) {
+                len = radio.getPacketLength();
+                if (len >= LORA_HEADER_SIZE + MIC_SIZE && len <= sizeof(buf)) {
+                    if (radio.readData(buf, len) == 0) {
+                        processLoRaPacket(buf, len);
+                    }
+                }
+                radio.startReceive();
+                continue;
+            }
+#endif
         }
-        delay(10);
+
+        delay(1);
     }
 }
 
@@ -167,13 +201,13 @@ void cloudTask(void* pv) {
                     cloud.sendTelemetry(req.nodeId, req.f1, req.f2, req.f3, req.seq, req.flags, req.rssi);
                     break;
                 case CloudReqType::WEATHER:
-                    cloud.sendWeather(req.f1, req.f2, (int)req.f3, req.seq);
+                    cloud.sendWeather(req.f1, req.f2, (int)req.f3, req.f4);
                     break;
                 case CloudReqType::HEARTBEAT:
                     cloud.sendHeartbeat(req.nodeId, (bool)(req.flags), req.f1);
                     break;
                 case CloudReqType::REGISTER:
-                    cloud.registerNode(req.nodeId, String(req.str1), String(req.str2));
+                    cloud.registerNode(req.nodeId, req.str1, req.str2);
                     break;
                 case CloudReqType::ACK:
                     cloud.sendAck(req.seq, (bool)(req.flags), req.f1);
@@ -185,8 +219,8 @@ void cloudTask(void* pv) {
 }
 
 void setup() {
-    Serial.begin(115200); delay(1000);
-    Serial.println(F("[GW] Starting Central Gateway v3.0 (WiFi Manager)"));
+    Serial.begin(115200);
+    Serial.println(F("[GW] Starting Central Gateway v3.1 (Optimized)"));
 
     wifiManager.begin(webServer);
     wifiManager.waitForConnection(15000);
@@ -194,22 +228,20 @@ void setup() {
     if (wifiManager.isConnected()) {
         if (MDNS.begin("startup-gateway")) {
             MDNS.addService("http", "tcp", 80);
-            Serial.println(F("[GW] mDNS: http://startup-gateway.local"));
         }
-        Serial.printf("[DBG] Free heap: %u\n", ESP.getFreeHeap()); Serial.flush();
+        Serial.printf("[DBG] Free heap: %u\n", ESP.getFreeHeap());
 
-        initLoRa(); Serial.println(F("[DBG] LoRa done"));
+        initLoRa();
 
-        nodeMgr.begin(); Serial.println(F("[DBG] NodeMgr done")); Serial.flush();
+        nodeMgr.begin();
 
-        Serial.println(F("[DBG] Dashboard begin...")); Serial.flush();
-        dashboard.begin(webServer); Serial.println(F("[DBG] Dashboard done")); Serial.flush();
+        dashboard.begin(webServer);
 
     #ifndef TTGO_GATEWAY
-        weather.begin(); Serial.println(F("[DBG] Weather done")); Serial.flush();
+        weather.begin();
     #endif
 
-        mqttBroker.begin(); Serial.println(F("[DBG] MQTT done")); Serial.flush();
+        mqttBroker.begin();
 
         dashboard.onActuatorToggle([](uint16_t nodeId, bool on) {
             enqueueLoraTx(nodeId, on, 0);
@@ -218,17 +250,19 @@ void setup() {
         dashboard.onNodeProvision(onNodeProvision);
         dashboard.onNodeRemove([](uint16_t id) {
             nodeMgr.remove(id);
-            dashboard.pushLog("info", ("Node 0x" + String(id, HEX) + " removed").c_str());
+            char buf[64];
+            snprintf(buf, sizeof(buf), "Node 0x%04X removed", id);
+            dashboard.pushLog("info", buf);
         });
         dashboard.onActuatorConfig(onActuatorConfig);
         dashboard.setNodesProvider([]() -> std::string { return nodeMgr.toJson(); });
         dashboard.setCloudCfgProvider([]() -> std::string {
             char buf[256];
-            snprintf(buf, sizeof(buf), R"({"url":"%s","apiKey":"%s"})", cloud.getUrl().c_str(), cloud.getApiKey().c_str());
+            snprintf(buf, sizeof(buf), R"({"url":"%s","apiKey":"%s"})", cloud.getUrl(), cloud.getApiKey());
             return std::string(buf);
         });
         dashboard.onCloudCfgUpdate([](const char* url, const char* apiKey) {
-            cloud.saveConfig(String(url), String(apiKey));
+            cloud.saveConfig(url, apiKey);
             Serial.printf("[GW] Cloud config updated: %s\n", url);
         });
 
@@ -238,10 +272,10 @@ void setup() {
             nodeMgr.setValveState(nodeId, on);
         });
 
-        loraTxQueue = xQueueCreate(4, sizeof(LoraTxItem));
-        cloudReqQueue = xQueueCreate(8, sizeof(CloudReq));
-        xTaskCreatePinnedToCore(loraTask, "lora", 4096, NULL, 3, NULL, 0);
-        xTaskCreatePinnedToCore(cloudTask, "cloud", 4096, NULL, 1, NULL, 0);
+        loraTxQueue = xQueueCreate(8, sizeof(LoraTxItem));
+        cloudReqQueue = xQueueCreate(16, sizeof(CloudReq));
+        xTaskCreatePinnedToCore(loraTask, "lora", 4096, NULL, 4, NULL, 1);
+        xTaskCreatePinnedToCore(cloudTask, "cloud", 8192, NULL, 1, NULL, 0);
 
         Serial.print(F("[GW] Dashboard: http://")); Serial.println(wifiManager.getLocalIP());
     } else {
@@ -252,7 +286,7 @@ void setup() {
 
 void loop() {
     wifiManager.loop();
-    if (!wifiManager.isConnected()) { vTaskDelay(pdMS_TO_TICKS(100)); return; }
+    if (!wifiManager.isConnected()) { delay(100); return; }
     static uint32_t lastWeatherMs = 0;
     uint32_t now = millis();
     mqttBroker.loop();
@@ -262,13 +296,13 @@ void loop() {
     if (now - lastWeatherMs >= WEATHER_INTERVAL_MS) {
         lastWeatherMs = now;
         WeatherData wd = weather.read();
-        char buf[300];
+        char buf[256];
         snprintf(buf, sizeof(buf),
             R"({"rain":%.2f,"wind":%.2f,"wind_adc":%d,"wind_deg":%.0f,"temp":%.1f,"hum":%.1f,"pres":%.1f,"lux":%.0f,"bat":%.0f,"ts":%u})",
             wd.rain_mm, wd.wind_speed_ms, wd.wind_vane_adc, wd.wind_dir_deg,
             wd.temperature_c, wd.humidity_pct, wd.pressure_hpa,
             wd.luminosity_lux, wd.battery_mv, now);
-        mqttBroker.publish(String(MqttTopics::GW_TELEMETRY), String(buf));
+        mqttBroker.publish(MqttTopics::GW_TELEMETRY, buf);
 
         WeatherTelemetryData wt;
         wt.rain_mm = wd.rain_mm; wt.wind_speed_ms = wd.wind_speed_ms;
@@ -280,7 +314,6 @@ void loop() {
         queueCloudWeather(wd.rain_mm, wd.wind_speed_ms, (int)wd.wind_dir_deg, wd.temperature_c);
     }
 #endif
-    vTaskDelay(pdMS_TO_TICKS(5));
 }
 
 static uint32_t lastAutoCmdMs = 0;
@@ -295,10 +328,10 @@ static void checkAutoControl(float moisturePct) {
         lastAutoCmdMs = now;
         enqueueLoraTx(ni->id, shouldOpen, 0);
         nodeMgr.setValveState(ni->id, shouldOpen);
-        dashboard.pushLog("info", (String("Auto ") + (shouldOpen ? "OPEN" : "CLOSE") +
-                          " actuator 0x" + String(ni->id, HEX) +
-                          " (moisture=" + String(moisturePct, 1) +
-                          " threshold=" + String(ni->threshold) + ")").c_str());
+        char logBuf[128];
+        snprintf(logBuf, sizeof(logBuf), "Auto %s actuator 0x%04X (moisture=%.1f threshold=%u)",
+                 shouldOpen ? "OPEN" : "CLOSE", ni->id, moisturePct, ni->threshold);
+        dashboard.pushLog("info", logBuf);
     }
 }
 
@@ -315,16 +348,27 @@ void onDecryptedPkt(uint16_t nodeId, PacketType type,
             float tc = st.temperature_c / 100.0f;
             float bv = st.battery_mv / 1000.0f;
 
-            String t = MqttTopics::sensorTelemetry(nodeId).c_str();
-            String p = MqttTopics::jsonTelemetry(st.sequence, mp, tc, bv, st.error_flags).c_str();
+            char t[32];
+            MqttTopics::sensorTelemetry(nodeId, t, sizeof(t));
+            char p[96];
+            MqttTopics::formatTelemetry(p, sizeof(p), st.sequence, mp, tc, bv, st.error_flags);
             mqttBroker.publish(t, p);
 
+            int8_t rssi;
+#ifndef TTGO_GATEWAY
+            rssi = (int8_t)radio.getRSSI(true);
+#else
+            rssi = (int8_t)radio.getLastRssi();
+#endif
             SensorTelemetryData d;
             d.node_id = nodeId; d.moisture_percent = mp; d.temperature_c = tc;
-            d.battery_v = bv; d.sequence = st.sequence; d.rssi = 0; d.timestamp = millis();
+            d.battery_v = bv; d.sequence = st.sequence;
+            d.rssi = rssi < 0 ? (uint32_t)(-rssi) : 0;
+            d.timestamp = millis();
             dashboard.pushSensorTelemetry(d);
 
-            queueCloudTelemetry(nodeId, mp, tc, bv, st.sequence, st.error_flags, 0);
+            queueCloudTelemetry(nodeId, mp, tc, bv, st.sequence, st.error_flags,
+                                rssi < 0 ? (uint8_t)(-rssi) : 0);
             checkAutoControl(mp);
             break;
         }
@@ -332,8 +376,10 @@ void onDecryptedPkt(uint16_t nodeId, PacketType type,
             if (len < 7) break;
             AckPayload ack;
             deserializeAck(pt, ack);
-            String t = MqttTopics::actuatorAck(nodeId).c_str();
-            String p = MqttTopics::jsonAck(ack.ack_seq, ack.result == 0, ack.battery_mv / 1000.0f).c_str();
+            char t[32];
+            MqttTopics::actuatorAck(nodeId, t, sizeof(t));
+            char p[96];
+            MqttTopics::formatAck(p, sizeof(p), ack.ack_seq, ack.result == 0, ack.battery_mv / 1000.0f);
             mqttBroker.publish(t, p);
             for (int i = 0; i < nodeMgr.count(); i++) {
                 const NodeInfo* ni = nodeMgr.getNode(i);
@@ -408,17 +454,34 @@ void enqueueLoraTx(uint16_t nodeId, bool on, uint32_t cloudCmdId) {
     }
 }
 
+static void jsonEscape(const char* src, char* dst, size_t sz) {
+    size_t j = 0;
+    for (size_t i = 0; src[i] && j < sz - 1; i++) {
+        char c = src[i];
+        if (c == '"' || c == '\\') {
+            if (j + 2 >= sz) break;
+            dst[j++] = '\\'; dst[j++] = c;
+        } else {
+            dst[j++] = c;
+        }
+    }
+    dst[j] = '\0';
+}
+
 void onNodeProvision(uint16_t nodeId, const uint8_t psk[16], const char* type, const char* alias) {
     uint8_t ntype = (strcmp(type, "actuator") == 0) ? 0x02 : 0x01;
     nodeMgr.provision(nodeId, ntype, psk, alias);
     Serial.printf("[GW] Provisioned node %04X as %s (%s)\n", nodeId, type, alias);
-    dashboard.pushLog("info", ("Node " + String(nodeId, HEX) + " provisioned as " + String(type)).c_str());
-    {   char buf[200];
-        snprintf(buf, sizeof(buf),
-            R"({"type":"provisioned","id":%u,"node_type":"%s","alias":"%s","status":"ok"})",
-            nodeId, type, alias);
-        dashboard.pushRaw(buf);
-    }
+    char logBuf[64];
+    snprintf(logBuf, sizeof(logBuf), "Node 0x%04X provisioned as %s", nodeId, type);
+    dashboard.pushLog("info", logBuf);
+    char aliasEsc[48];
+    jsonEscape(alias, aliasEsc, sizeof(aliasEsc));
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+        R"({"type":"provisioned","id":%u,"node_type":"%s","alias":"%s","status":"ok"})",
+        nodeId, type, aliasEsc);
+    dashboard.pushRaw(buf);
     queueCloudNode(nodeId, type, alias);
 }
 
@@ -426,7 +489,9 @@ void onActuatorConfig(uint16_t nodeId, bool autoMode, uint8_t threshold, uint16_
     if (nodeMgr.setActuatorConfig(nodeId, autoMode, threshold, sensorId)) {
         Serial.printf("[GW] Actuator 0x%04X config: auto=%s threshold=%u sensorId=%u\n",
                       nodeId, autoMode ? "ON" : "OFF", threshold, sensorId);
-        dashboard.pushLog("info", ("Actuator 0x" + String(nodeId, HEX) + " config updated").c_str());
+        char logBuf[64];
+        snprintf(logBuf, sizeof(logBuf), "Actuator 0x%04X config updated", nodeId);
+        dashboard.pushLog("info", logBuf);
     }
 }
 
@@ -442,7 +507,7 @@ void queueCloudHeartbeat(uint16_t nodeId, bool valveOpen, float bv) {
 }
 void queueCloudWeather(float rain, float wind, int wdir, float temp) {
     CloudReq r; r.type = CloudReqType::WEATHER;
-    r.f1 = rain; r.f2 = wind; r.f3 = (float)wdir; r.seq = (uint32_t)temp;
+    r.f1 = rain; r.f2 = wind; r.f3 = (float)wdir; r.f4 = temp;
     xQueueSend(cloudReqQueue, &r, 0);
 }
 void queueCloudNode(uint16_t nodeId, const char* type, const char* alias) {
@@ -464,14 +529,13 @@ void initLoRa() {
 #endif
     loraReady = false;
     int st = radio.begin(LORA_FREQ, 125.0f, 9, 5, 0x12, 10, 12);
+#ifndef TTGO_GATEWAY
     Serial.printf("[GW] LoRa begin=%d chipver=0x%02X\n", st, radio.getChipVersion());
+#else
+    Serial.printf("[GW] LoRa begin=%d\n", st);
+#endif
     if (st != 0) { return; }
     loraReady = true;
-    uint8_t warmup[2] = {0};
-    int tst = manualTransmit(radio, warmup, 2);
-    Serial.printf("[GW] warmup Tx: ret=%d\n", tst);
-    tst = manualTransmit(radio, warmup, 2);
-    Serial.printf("[GW] warmup2 Tx: ret=%d\n", tst);
     st = radio.startReceive();
     if (st == 0) { Serial.println("[GW] LoRa ready @ 868 MHz"); } else { Serial.println("[GW] Rx start fail"); }
 }

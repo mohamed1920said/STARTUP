@@ -163,13 +163,16 @@ float WeatherStation::readLuminosity() {
 }
 
 // ---------- Wind Vane ADC median filter ----------
-// Takes 5 readings with 2 ms spacing and returns the median value.
-// Rejects transient noise from gust/wobble.
+// Takes 5 rapid readings and returns the median value.
+// Rejects transient noise. Uses micros() delay instead of blocking delay().
 int WeatherStation::median5() {
     int samples[5];
     for (int i = 0; i < 5; i++) {
         samples[i] = analogRead(_vane);
-        if (i < 4) delay(2);
+        if (i < 4) {
+            uint32_t t = micros();
+            while (micros() - t < 200) {}  // 200 us ADC settling
+        }
     }
     // insertion sort
     for (int i = 1; i < 5; i++) {

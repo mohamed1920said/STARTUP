@@ -1,6 +1,21 @@
 #include "NodeManager.h"
 #include <cstring>
 
+// Escape JSON-special characters in a string (for user-supplied alias)
+static void jsonEscape(const char* src, char* dst, size_t dstSz) {
+    size_t j = 0;
+    for (size_t i = 0; src[i] && j < dstSz - 1; i++) {
+        char c = src[i];
+        if (c == '"' || c == '\\') {
+            if (j + 2 >= dstSz) break;
+            dst[j++] = '\\'; dst[j++] = c;
+        } else {
+            dst[j++] = c;
+        }
+    }
+    dst[j] = '\0';
+}
+
 NodeManager::NodeManager() : _count(0) {
     for (auto& n : _nodes) n.registered = false;
 }
@@ -84,20 +99,26 @@ void NodeManager::saveNVS(const NodeInfo& info) {
 }
 
 std::string NodeManager::toJson() const {
-    std::string json = "[";
+    // Pre-calculate approximate size to avoid reallocation
+    size_t approx = 2 + _count * 180 + 1;
+    std::string json;
+    json.reserve(approx);
+    json = '[';
     for (int i = 0; i < _count; i++) {
-        if (i > 0) json += ",";
+        if (i > 0) json += ',';
+        char aliasEsc[48];
+        jsonEscape(_nodes[i].alias, aliasEsc, sizeof(aliasEsc));
         char buf[256];
         snprintf(buf, sizeof(buf),
             R"({"id":%u,"type":%u,"alias":"%s","registered":%s,"lastSeq":%u,"lastSeen":%u,"autoMode":%s,"threshold":%u,"sensorId":%u})",
-            _nodes[i].id, _nodes[i].type, _nodes[i].alias,
+            _nodes[i].id, _nodes[i].type, aliasEsc,
             _nodes[i].registered ? "true" : "false",
             _nodes[i].lastSeq, _nodes[i].lastSeen,
             _nodes[i].autoMode ? "true" : "false",
             _nodes[i].threshold, _nodes[i].sensorId);
         json += buf;
     }
-    json += "]";
+    json += ']';
     return json;
 }
 

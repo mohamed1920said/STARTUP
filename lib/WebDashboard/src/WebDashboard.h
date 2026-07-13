@@ -68,9 +68,6 @@ private:
     CloudCfgUpdateCallback _cloudCfgUpdate_cb;
     void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
                    AwsEventType type, void* arg, uint8_t* data, size_t len);
-    std::string serializeSensor(const SensorTelemetryData& d);
-    std::string serializeWeather(const WeatherTelemetryData& d);
-    std::string serializeActuator(const ActuatorStateData& d);
     void serveStaticFiles();
     void registerApiHandlers();
     void registerOtaHandler();

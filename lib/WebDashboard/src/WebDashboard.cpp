@@ -91,13 +91,33 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
 }
 
 void WebDashboard::pushSensorTelemetry(const SensorTelemetryData& d) {
-    if (_ws) { std::string s = serializeSensor(d); _ws->textAll(s.c_str()); }
+    if (!_ws) return;
+    char buf[256];
+    std::snprintf(buf, sizeof(buf),
+        R"({"type":"sensor","id":%u,"moisture":%.1f,"temp":%.2f,)"
+        R"("batt":%.2f,"seq":%u,"rssi":%u,"ts":%u})",
+        (unsigned)d.node_id, d.moisture_percent, d.temperature_c,
+        d.battery_v, d.sequence, (unsigned)d.rssi, d.timestamp);
+    _ws->textAll(buf);
 }
 void WebDashboard::pushWeatherTelemetry(const WeatherTelemetryData& d) {
-    if (_ws) { std::string s = serializeWeather(d); _ws->textAll(s.c_str()); }
+    if (!_ws) return;
+    char buf[256];
+    auto val = [](float v) { return isnan(v) || isinf(v) ? 0.0f : v; };
+    std::snprintf(buf, sizeof(buf),
+        R"({"type":"weather","rain":%.2f,"wind":%.2f,"dir":%u,"temp":%.1f,"hum":%.1f,"pres":%.1f,"lux":%.0f,"bat":%.0f,"ts":%u})",
+        val(d.rain_mm), val(d.wind_speed_ms), d.wind_dir_deg, val(d.temperature_c),
+        val(d.humidity_pct), val(d.pressure_hpa), val(d.luminosity_lux), val(d.battery_mv),
+        (unsigned)millis());
+    _ws->textAll(buf);
 }
 void WebDashboard::pushActuatorState(const ActuatorStateData& d) {
-    if (_ws) { std::string s = serializeActuator(d); _ws->textAll(s.c_str()); }
+    if (!_ws) return;
+    char buf[192];
+    std::snprintf(buf, sizeof(buf),
+        R"({"type":"actuator","id":%u,"valve":%s,"batt":%.2f,"ts":%u})",
+        d.node_id, d.valve_open ? "true" : "false", d.battery_v, d.timestamp);
+    _ws->textAll(buf);
 }
 void WebDashboard::pushRaw(const char* json) {
     if (_ws) _ws->textAll(json);
@@ -110,33 +130,6 @@ void WebDashboard::pushLog(const char* level, const char* message) {
         R"({"type":"log","level":"%s","msg":"%s","ts":%u})",
         level, message, (unsigned)millis());
     _ws->textAll(buf);
-}
-
-std::string WebDashboard::serializeSensor(const SensorTelemetryData& d) {
-    char buf[256];
-    std::snprintf(buf, sizeof(buf),
-        R"({"type":"sensor","id":%u,"moisture":%.1f,"temp":%.2f,)"
-        R"("batt":%.2f,"seq":%u,"rssi":%ld,"ts":%u})",
-        d.node_id, d.moisture_percent, d.temperature_c,
-        d.battery_v, d.sequence, d.rssi, d.timestamp);
-    return buf;
-}
-std::string WebDashboard::serializeWeather(const WeatherTelemetryData& d) {
-    char buf[384];
-    auto val = [](float v) { return isnan(v) || isinf(v) ? 0.0f : v; };
-    std::snprintf(buf, sizeof(buf),
-        R"({"type":"weather","rain":%.2f,"wind":%.2f,"dir":%u,"temp":%.1f,"hum":%.1f,"pres":%.1f,"lux":%.0f,"bat":%.0f,"ts":%u})",
-        val(d.rain_mm), val(d.wind_speed_ms), d.wind_dir_deg, val(d.temperature_c),
-        val(d.humidity_pct), val(d.pressure_hpa), val(d.luminosity_lux), val(d.battery_mv),
-        (unsigned)millis());
-    return buf;
-}
-std::string WebDashboard::serializeActuator(const ActuatorStateData& d) {
-    char buf[196];
-    std::snprintf(buf, sizeof(buf),
-        R"({"type":"actuator","id":%u,"valve":%s,"batt":%.2f,"ts":%u})",
-        d.node_id, d.valve_open ? "true" : "false", d.battery_v, d.timestamp);
-    return buf;
 }
 
 void WebDashboard::serveStaticFiles() {
