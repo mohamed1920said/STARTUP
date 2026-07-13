@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="system">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IoT Horizon | LoRa Enterprise</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+
+  <div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <i data-lucide="radio-tower" class="logo-icon"></i>
+          <span class="logo-text">IoT Horizon</span>
+        </div>
+        <button class="icon-btn mobile-close" id="sidebar-close">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <div class="sidebar-nav">
+        <div class="nav-section">MAIN</div>
+        <a href="#summary" class="nav-item active"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></a>
+        <a href="#sensors" class="nav-item"><i data-lucide="cpu"></i><span>Sensors</span></a>
+        <a href="#actuators" class="nav-item"><i data-lucide="droplets"></i><span>Actuators</span></a>
+        <a href="#weather" class="nav-item"><i data-lucide="cloud-rain"></i><span>Weather</span></a>
+
+        <div class="nav-section">MANAGEMENT</div>
+        <a href="#registered-nodes" class="nav-item"><i data-lucide="server"></i><span>Device Fleet</span></a>
+        <a href="#provisioning" class="nav-item"><i data-lucide="plus-circle"></i><span>Provisioning</span></a>
+        <a href="#cloud-config" class="nav-item"><i data-lucide="cloud"></i><span>Cloud Sync</span></a>
+        <a href="#ota" class="nav-item"><i data-lucide="download-cloud"></i><span>OTA Updates</span></a>
+
+        <div class="nav-section">SYSTEM</div>
+        <a href="#log" class="nav-item"><i data-lucide="terminal-square"></i><span>Audit Logs</span></a>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-profile">
+          <img src="https://ui-avatars.com/api/?name=Admin+User&background=58a6ff&color=fff" alt="User" class="avatar">
+          <div class="user-info">
+            <span class="user-name">Admin User</span>
+            <span class="user-role">System Architect</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-wrapper">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-btn" id="sidebar-toggle">
+            <i data-lucide="menu"></i>
+          </button>
+          <div class="breadcrumb">
+            <span>Overview</span>
+            <i data-lucide="chevron-right"></i>
+            <span class="current">Live Dashboard</span>
+          </div>
+        </div>
+
+        <div class="topbar-right">
+          <div id="health-bar" class="status-pill">
+            <i data-lucide="activity"></i>
+            <span id="health-status">Connecting...</span>
+          </div>
+          <div class="status-pill clock-pill">
+            <i data-lucide="clock"></i>
+            <span id="clock"></span>
+          </div>
+          <div class="divider"></div>
+          <button class="icon-btn theme-toggle" id="theme-btn" title="Toggle Theme">
+            <i data-lucide="sun" class="sun-icon"></i>
+            <i data-lucide="moon" class="moon-icon"></i>
+          </button>
+          <button class="icon-btn notification-btn">
+            <i data-lucide="bell"></i>
+            <span class="badge">3</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="content">
+        <div class="page-header">
+          <div>
+            <h2>Enterprise IoT Dashboard</h2>
+            <p class="subtitle">Real-time monitoring and control of your agricultural nodes.</p>
+          </div>
+          <button id="restart-btn" class="btn-danger" onclick="restartGw()">
+            <i data-lucide="power"></i> Restart Gateway
+          </button>
+        </div>
+
+        <section id="summary">
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-icon blue"><i data-lucide="activity"></i></div>
+              <div class="kpi-data">
+                <label>Gateway Uptime</label>
+                <div class="kpi-value"><span id="gw-uptime">--</span><span class="unit">s</span></div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon green"><i data-lucide="database"></i></div>
+              <div class="kpi-data">
+                <label>Free Memory</label>
+                <div class="kpi-value"><span id="gw-heap">--</span><span class="unit">KB</span></div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon purple"><i data-lucide="wifi"></i></div>
+              <div class="kpi-data">
+                <label>WiFi Signal</label>
+                <div class="kpi-value"><span id="gw-rssi">--</span><span class="unit">dBm</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="weather">
+          <div class="section-title">
+            <h3><i data-lucide="cloud-sun"></i> Weather Station</h3>
+          </div>
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-icon orange"><i data-lucide="thermometer"></i></div>
+              <div class="kpi-data">
+                <label>Temperature</label>
+                <div class="kpi-value"><span id="w-temp">--</span><span class="unit">°C</span></div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon cyan"><i data-lucide="droplets"></i></div>
+              <div class="kpi-data">
+                <label>Humidity</label>
+                <div class="kpi-value"><span id="w-hum">--</span><span class="unit">%</span></div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon purple"><i data-lucide="gauge"></i></div>
+              <div class="kpi-data">
+                <label>Pressure</label>
+                <div class="kpi-value"><span id="w-pres">--</span><span class="unit">hPa</span></div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon blue"><i data-lucide="umbrella"></i></div>
+              <div class="kpi-data">
+                <label>Precipitation</label>
+                <div class="kpi-value"><span id="rain">--</span><span class="unit">mm</span></div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon teal"><i data-lucide="wind"></i></div>
+              <div class="kpi-data">
+                <label>Wind Speed</label>
+                <div class="kpi-value"><span id="wind">--</span><span class="unit">km/h</span></div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon indigo"><i data-lucide="compass"></i></div>
+              <div class="kpi-data">
+                <label>Wind Dir</label>
+                <div class="kpi-value"><span id="wind-dir">--</span><span class="unit">°</span></div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon yellow"><i data-lucide="sun"></i></div>
+              <div class="kpi-data">
+                <label>Luminosity</label>
+                <div class="kpi-value"><span id="w-lux">--</span><span class="unit">lux</span></div>
+              </div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-icon green"><i data-lucide="battery-charging"></i></div>
+              <div class="kpi-data">
+                <label>Battery</label>
+                <div class="kpi-value"><span id="w-bat">--</span><span class="unit">%</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="node-sections-wrapper">
+          <section id="sensors">
+            <div class="section-title">
+              <h3><i data-lucide="cpu"></i> Active Sensors</h3>
+            </div>
+            <div id="sensor-cards">
+              <div id="sensor-placeholder" class="empty-state">
+                <i data-lucide="radio-receiver" class="pulse-icon"></i>
+                <p>Waiting for sensor telemetry...</p>
+              </div>
+            </div>
+          </section>
+
+          <section id="actuators">
+            <div class="section-title">
+              <h3><i data-lucide="droplet"></i> Irrigation Actuators</h3>
+            </div>
+            <div id="actuator-cards">
+              <div class="empty-state">
+                <i data-lucide="power-off"></i>
+                <p>No actuator data available</p>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="management-grid">
+          <div class="left-col">
+            <section id="provisioning" class="panel">
+              <div class="panel-header">
+                <h3><i data-lucide="plus-square"></i> Provision Node</h3>
+              </div>
+              <div class="panel-body">
+                <form id="provision-form" class="modern-form">
+                  <div class="form-group">
+                    <label>Node Type</label>
+                    <select id="p-type" required>
+                      <option value="sensor">Sensor Node</option>
+                      <option value="actuator">Actuator Node</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Hardware ID</label>
+                    <input type="text" id="p-id" placeholder="e.g. 0001 (Hex)" maxlength="4" required>
+                  </div>
+                  <div class="form-group full-width">
+                    <label>Pre-Shared Key (PSK)</label>
+                    <input type="text" id="p-psk" placeholder="32-character hex key" maxlength="32" required>
+                  </div>
+                  <div class="form-group full-width">
+                    <label>Alias Name (Optional)</label>
+                    <input type="text" id="p-alias" placeholder="e.g. Greenhouse Zone A" maxlength="16">
+                  </div>
+                  <div class="form-actions full-width">
+                    <button type="submit" class="btn-primary">Register Node</button>
+                    <div id="provision-status" class="status-msg"></div>
+                  </div>
+                </form>
+              </div>
+            </section>
+
+            <section id="cloud-config" class="panel">
+              <div class="panel-header">
+                <h3><i data-lucide="cloud"></i> Cloud Synchronization</h3>
+              </div>
+              <div class="panel-body">
+                <form id="cloud-form" class="modern-form">
+                  <div class="form-group full-width">
+                    <label>Endpoint URL</label>
+                    <input type="url" id="c-url" placeholder="http://192.168.1.100:8082" required>
+                  </div>
+                  <div class="form-group full-width">
+                    <label>API Key</label>
+                    <input type="password" id="c-apikey" placeholder="Enter API Key" required>
+                  </div>
+                  <div class="form-actions full-width">
+                    <button type="submit" class="btn-secondary">Save Configuration</button>
+                    <div id="cloud-status" class="status-msg"></div>
+                  </div>
+                </form>
+              </div>
+            </section>
+
+            <section id="ota" class="panel">
+              <div class="panel-header">
+                <h3><i data-lucide="download-cloud"></i> Firmware OTA</h3>
+              </div>
+              <div class="panel-body">
+                <form id="ota-form" enctype="multipart/form-data" class="modern-form file-form">
+                  <div class="file-upload-wrapper">
+                    <i data-lucide="upload-cloud"></i>
+                    <span>Drag & drop or click to select .bin file</span>
+                    <input type="file" name="firmware" accept=".bin" required>
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit" class="btn-secondary">Initiate Update</button>
+                    <div id="ota-progress" class="status-msg"></div>
+                  </div>
+                </form>
+              </div>
+            </section>
+          </div>
+
+          <div class="right-col">
+            <section id="registered-nodes" class="panel table-panel">
+              <div class="panel-header">
+                <h3><i data-lucide="server"></i> Device Fleet</h3>
+                <div class="search-box">
+                  <i data-lucide="search"></i>
+                  <input type="text" placeholder="Search nodes...">
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table id="nodes-table" class="modern-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Status</th>
+                      <th>Type</th>
+                      <th>Alias</th>
+                      <th>Seq</th>
+                      <th>Auto Mode</th>
+                      <th>Threshold</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="nodes-tbody"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section id="log" class="panel terminal-panel">
+              <div class="terminal-header">
+                <div class="dots"><span></span><span></span><span></span></div>
+                <div class="terminal-title">System Audit Log</div>
+                <div class="terminal-actions"><i data-lucide="copy"></i></div>
+              </div>
+              <pre id="log-output" class="terminal-body"></pre>
+            </section>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/app.js"></script>
+
+  <script>
+    // Initialize Icons
+    lucide.createIcons();
+
+    // Theme Management
+    const themeBtn = document.getElementById('theme-btn');
+    const htmlEl = document.documentElement;
+
+    function applyTheme(theme) {
+      if (theme === 'system') {
+        const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        htmlEl.setAttribute('data-theme', systemTheme);
+      } else {
+        htmlEl.setAttribute('data-theme', theme);
+      }
+      localStorage.setItem('iot-theme', theme);
+    }
+
+    const savedTheme = localStorage.getItem('iot-theme') || 'system';
+    applyTheme(savedTheme);
+
+    themeBtn.addEventListener('click', () => {
+      const current = htmlEl.getAttribute('data-theme');
+      applyTheme(current === 'dark' ? 'light' : 'dark');
+    });
+
+    // Sidebar Mobile Toggle
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const sidebarClose = document.getElementById('sidebar-close');
+
+    sidebarToggle.addEventListener('click', () => sidebar.classList.add('open'));
+    sidebarClose.addEventListener('click', () => sidebar.classList.remove('open'));
+
+    // Highlight active nav item on scroll
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+      item.addEventListener('click', () => {
+        document.querySelector('.nav-item.active').classList.remove('active');
+        item.classList.add('active');
+        if (window.innerWidth <= 768) sidebar.classList.remove('open');
+      });
+    });
+  </script>
+</body>
+
+</html>

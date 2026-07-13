@@ -1,0 +1,64 @@
+HOW TO UPLOAD FIRMWARE TO MCU
+================================
+
+All nodes use PlatformIO. Install it first:
+  pip install platformio
+
+Connect the board via USB. Determine which COM port is assigned
+(Windows: check Device Manager > Ports; Linux: ls /dev/ttyUSB* /dev/ttyACM*).
+
+
+1. CENTRAL GATEWAY (ESP32-S3 — RadioLib)
+-----------------------------------------
+  pio run -e central_gateway -t upload --upload-port COM_PORT
+
+  Upload filesystem (dashboard SPA):
+    pio run -e central_gateway -t uploadfs --upload-port COM_PORT
+
+  Monitor:
+    pio device monitor -p COM_PORT -b 115200
+
+
+2. CENTRAL GATEWAY (TTGO LoRa32 v2.1 — LoRa library)
+------------------------------------------------------
+  pio run -e central_gateway_ttgo -t upload --upload-port COM_PORT
+
+  Upload filesystem:
+    pio run -e central_gateway_ttgo -t uploadfs --upload-port COM_PORT
+
+  Monitor:
+    pio device monitor -p COM_PORT -b 115200
+
+
+3. SENSOR NODE (TTGO LoRa32 v2.1)
+-----------------------------------
+  pio run -e sensor_node -t upload --upload-port COM_PORT
+
+  Monitor:
+    pio device monitor -p COM_PORT -b 115200
+
+
+4. ACTUATOR NODE (TTGO LoRa32 v2.1)
+-------------------------------------
+  pio run -e actuator_node -t upload --upload-port COM_PORT
+
+  Monitor:
+    pio device monitor -p COM_PORT -b 115200
+
+
+5. TEST ENVS (TTGO LoRa32 v2.1)
+---------------------------------
+  TX test:
+    pio run -e test_tx -t upload --upload-port COM_PORT
+
+  RX test (uses LoRa library):
+    pio run -e test_rx -t upload --upload-port COM_PORT
+
+
+NOTES
+-----
+- If upload fails, hold BOOT button on ESP32-S3 while uploading.
+- TTGO boards auto-reset; no button needed.
+- First-time upload may pull library dependencies automatically.
+- For gateway, upload firmware BEFORE filesystem (uploadfs).
+- Typical COM ports: COM3-COM9 (Windows), /dev/ttyUSB0 (Linux).
