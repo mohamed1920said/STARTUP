@@ -1,0 +1,168 @@
+#include "NodeManager.h"
+#include <cstring>
+
+// Escape JSON-special characters in a string (for user-supplied alias)
+static void jsonEscape(const char* src, char* dst, size_t dstSz) {
+    size_t j = 0;
+    for (size_t i = 0; src[i] && j < dstSz - 1; i++) {
+        char c = src[i];
+        if (c == '"' || c == '\\') {
+            if (j + 2 >= dstSz) break;
+            dst[j++] = '\\'; dst[j++] = c;
+        } else if (c == '\n' || c == '\r' || c == '\t' || static_cast<unsigned char>(c) < 0x20) {
+            if (j + 6 >= dstSz) break;
+            snprintf(dst + j, dstSz - j, "\\u%04X", static_cast<unsigned char>(c));
+            j += 6;
+        } else {
+            dst[j++] = c;
+        }
+    }
+    dst[j] = '\0';
+}
+
+NodeManager::NodeManager() : _count(0) {
+    for (auto& n : _nodes) n.registered = false;
+}
+
+void NodeManager::begin() { loadNVS(); }
+
+bool NodeManager::provision(uint16_t id, uint8_t type,
+                             const uint8_t psk[16], const char* alias) {
+    if (!psk || !alias || id == 0 || (type != 0x01 && type != 0x02)) return false;
+    uint8_t derived[16];
+    if (!CryptoEngine::deriveSessionKey(psk, id, derived)) return false;
+    NodeInfo* n = find(id);
+    if (!n) {
+        if (_count >= MAX_NODES) return false;
+        n = &_nodes[_count++];
+    }
+    n->id = id;
+    n->type = type;
+    memcpy(n->psk, psk, 16);
+    memcpy(n->sessionKey, derived, sizeof(derived));
+    n->registered = true;
+    n->lastSeq = 0;
+    n->lastSeen = millis();
+    n->autoMode = false;
+    n->threshold = 50;
+    n->sensorId = 0;
+    n->valveOpen = false;
+    n->lastTelemetrySeq = 0;
+    n->lastAckSeq = 0;
+    n->lastHeartbeatSeq = 0;
+    strncpy(n->alias, alias, 23); n->alias[23] = 0;
+    saveNVS(*n);
+    return true;
+}
+
+bool NodeManager::handlePacket(uint16_t nodeId, PacketType type,
+                               const uint8_t* pt, size_t len, uint32_t seq) {
+    NodeInfo* n = find(nodeId);
+    if (!n || !n->registered || seq == 0) return false;
+    uint32_t* streamLast = nullptr;
+    switch (type) {
+        case PacketType::SENSOR_TELEMETRY: streamLast = &n->lastTelemetrySeq; break;
+        case PacketType::ACK:              streamLast = &n->lastAckSeq; break;
+        case PacketType::HEARTBEAT:        streamLast = &n->lastHeartbeatSeq; break;
+        default: return false;
+    }
+    if (seq <= *streamLast) return false;
+    *streamLast = seq;
+    n->lastSeen = millis();
+    n->lastSeq = seq;
+    saveNVS(*n);
+    return true;
+}
+
+bool NodeManager::remove(uint16_t id) {
+    nvs_handle_t h;
+    if (nvs_open("node_db", NVS_READWRITE, &h) != ESP_OK) return false;
+    char key[16]; snprintf(key, sizeof(key), "n_%04X", id);
+    nvs_erase_key(h, key); nvs_commit(h); nvs_close(h);
+    for (int i = 0; i < _count; i++) {
+        if (_nodes[i].id == id) {
+            for (int j = i; j < _count - 1; j++) _nodes[j] = _nodes[j + 1];
+            _count--;
+            _nodes[_count].registered = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool NodeManager::setActuatorConfig(uint16_t id, bool autoMode, uint8_t threshold, uint16_t sensorId) {
+    NodeInfo* n = find(id);
+    if (!n || !n->registered || n->type != 0x02) return false;
+    if (autoMode) {
+        NodeInfo* sensor = find(sensorId);
+        if (!sensor || sensor->type != 0x01) return false;
+    }
+    n->autoMode = autoMode;
+    n->threshold = constrain(threshold, 0, 100);
+    n->sensorId = sensorId;
+    saveNVS(*n);
+    return true;
+}
+
+void NodeManager::setValveState(uint16_t id, bool open) {
+    NodeInfo* n = find(id);
+    if (n) n->valveOpen = open;
+}
+
+NodeInfo* NodeManager::find(uint16_t id) {
+    for (int i = 0; i < _count; i++)
+        if (_nodes[i].registered && _nodes[i].id == id) return &_nodes[i];
+    return nullptr;
+}
+
+void NodeManager::saveNVS(const NodeInfo& info) {
+    nvs_handle_t h;
+    if (nvs_open("node_db", NVS_READWRITE, &h) != ESP_OK) return;
+    char key[16]; snprintf(key, sizeof(key), "n_%04X", info.id);
+    nvs_set_blob(h, key, &info, sizeof(NodeInfo));
+    nvs_commit(h); nvs_close(h);
+}
+
+std::string NodeManager::toJson() const {
+    // Pre-calculate approximate size to avoid reallocation
+    size_t approx = 2 + _count * 180 + 1;
+    std::string json;
+    json.reserve(approx);
+    json = '[';
+    for (int i = 0; i < _count; i++) {
+        if (i > 0) json += ',';
+        char aliasEsc[144];
+        jsonEscape(_nodes[i].alias, aliasEsc, sizeof(aliasEsc));
+        char buf[384];
+        snprintf(buf, sizeof(buf),
+            R"({"id":%u,"type":%u,"alias":"%s","registered":%s,"lastSeq":%u,"lastSeen":%u,"autoMode":%s,"threshold":%u,"sensorId":%u})",
+            _nodes[i].id, _nodes[i].type, aliasEsc,
+            _nodes[i].registered ? "true" : "false",
+            _nodes[i].lastSeq, _nodes[i].lastSeen,
+            _nodes[i].autoMode ? "true" : "false",
+            _nodes[i].threshold, _nodes[i].sensorId);
+        json += buf;
+    }
+    json += ']';
+    return json;
+}
+
+void NodeManager::loadNVS() {
+    nvs_handle_t h;
+    if (nvs_open("node_db", NVS_READONLY, &h) != ESP_OK) return;
+    nvs_iterator_t it = nvs_entry_find("nvs", "node_db", NVS_TYPE_BLOB);
+    while (it != NULL) {
+        nvs_entry_info_t ei; nvs_entry_info(it, &ei);
+        if (_count < MAX_NODES) {
+            size_t sz = sizeof(NodeInfo);
+            NodeInfo& ni = _nodes[_count];
+            memset(&ni, 0, sizeof(ni));
+            if (nvs_get_blob(h, ei.key, &ni, &sz) == ESP_OK) {
+                ni.alias[sizeof(ni.alias) - 1] = 0;
+                _count++;
+            }
+        }
+        it = nvs_entry_next(it);
+    }
+    nvs_close(h);
+}
