@@ -1,0 +1,9 @@
+{
+    "name": "LoraNetwork",
+    "version": "1.0.0",
+    "description": "Shared LoRa networking, crypto, and packet types for ESP32-S3 multi-node network",
+    "keywords": ["lora", "sx1262", "aes-gcm", "esp32"],
+    "authors": [{"name": "LoRa Node Project"}],
+    "frameworks": ["arduino"],
+    "platforms": ["espressif32"]
+}

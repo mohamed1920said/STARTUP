@@ -1,0 +1,10 @@
+{
+  "name": "WiFiManager",
+  "version": "1.0.0",
+  "description": "Captive portal WiFi configuration manager",
+  "keywords": "wifi, manager, captive, portal",
+  "authors": { "name": "STARTUP" },
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

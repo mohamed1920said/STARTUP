@@ -1,0 +1,37 @@
+AMR FIRMWARE UPLOAD GUIDE
+=========================
+
+Install PlatformIO, connect the target board by USB, and identify its COM port.
+
+1. ESP32-S3 CENTRAL GATEWAY
+----------------------------
+Firmware:
+  pio run -e central_gateway -t upload --upload-port COM_PORT
+
+Dashboard filesystem:
+  pio run -e central_gateway -t uploadfs --upload-port COM_PORT
+
+Windows helper (defaults to COM4):
+  flash_central.bat COM_PORT
+
+Serial monitor:
+  pio device monitor --port COM_PORT --baud 115200
+
+Upload gateway firmware before the filesystem. If connection fails, hold BOOT while the upload starts.
+
+2. SOIL SENSOR NODE
+-------------------
+  pio run -e sensor_node -t upload --upload-port COM_PORT
+  pio device monitor --port COM_PORT --baud 115200
+
+3. ACTUATOR NODE
+----------------
+  pio run -e actuator_node -t upload --upload-port COM_PORT
+  pio device monitor --port COM_PORT --baud 115200
+
+IMPORTANT
+---------
+- Flash matching releases to the gateway, sensor and actuator.
+- The gateway commissioning AP is open and requires no Wi-Fi password.
+- Create the dashboard administrator password on the setup page.
+- Never publish node PSKs, administrator passwords or cloud API keys.
