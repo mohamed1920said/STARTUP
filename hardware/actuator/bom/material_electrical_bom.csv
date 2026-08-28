@@ -1,0 +1,22 @@
+﻿Item,Description,Qty,Specification,Release note
+M01,5840-31ZY double-shaft gearmotor,1,"12 V, 40 rpm nominal",HOLD - measure supplier unit
+M02,6204-2RS sealed bearing,2,20 x 47 x 14 mm,Known standard
+M03,AS5600 angle module,1,3.3 V I2C,Measure PCB and magnet gap
+M04,Diametric magnet,1,6 x 2.5 mm target,Match AS5600 vendor guidance
+M05,Reed switch,2,Sealed dry contact,OPEN/CLOSED confirmation
+M06,Reed cam magnet,2,"Small NdFeB, retained",Pot and mechanically capture
+M07,Long-lever microswitch,2,"C/NO/NC, 250 VAC 5 A",Used at low-current control level
+M08,Manual interlock switch,1,Two-pole NC + auxiliary,Hardware driver disable
+M09,TTGO LoRa32 v2.1,1,868 MHz,Antenna separated from motor
+M10,BTS7960 / IBT-2,1,High-current H bridge,Qualify against measured stall current
+M11,MCP23017 input expander,1,3.3 V I2C,"Reeds, limits, manual input"
+M12,3S BMS,1,Balancing + overcurrent,Rating from measured current
+M13,Protected 18650 cell,3,"Matched cells, 3S1P",12.6 V maximum
+M14,Fuse and holder,1,DC rated,Size after motor-current test
+M15,Logic DC/DC converter,1,12.6 V input to stable logic rail,Automotive/transient capable
+M16,EPDM clamp liner,1,3 mm sheet,Protect PVC body
+M17,EPDM enclosure gasket,1,Closed-cell,Compression verified by ingress test
+M18,Cable glands,4,"IP68, sized to cables",Strain relief
+M19,Hydrophobic vent,1,IP67 pressure equalization,Above drainage plane
+M20,Friction washers,2,Oil/water-stable friction material,Torque test wet and dry
+M21,Bronze/steel gear sleeve,1,30.0 mm nominal interface,Final tolerance after wear test

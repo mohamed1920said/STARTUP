@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "AMR_Central")(type "Legacy")(uri "${KIPRJMOD}/AMR_Central.lib")(options "")(descr "AMR central gateway symbols"))
+)

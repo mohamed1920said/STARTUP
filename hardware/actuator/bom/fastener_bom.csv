@@ -1,0 +1,19 @@
+﻿Item,Description,Qty,Use
+F01,M3 x 8 A4 socket screw,12,Electronics and sensor PCBs
+F02,M3 A4 Nyloc + washer,12,Electronics
+F03,M4 x 12 A4 socket screw,8,Sensor/reed brackets
+F04,M4 A4 Nyloc + washer,8,Sensor/reed brackets
+F05,M5 x 16 A4 socket screw,8,Microswitch and small structure
+F06,M5 A4 Nyloc + washer,8,Small structure
+F07,M6 x 20 A4 socket screw,16,"Motor, carriers, shaft flange"
+F08,M6 A4 Nyloc + washer,16,"Motor, carriers, shaft flange"
+F09,M8 x 70 A4 bolt,4,Valve bridge clamp; confirm length
+F10,M8 A4 Nyloc + large washer,4,Valve bridge clamp
+F11,M8 x 35 steel stop screw,2,Mechanical stops
+F12,M8 jam nut,4,Two per stop
+F13,M16 prevailing-torque nut,1,Clutch preload
+F14,M16 Belleville washers,1,Select stack for about 530 N initial preload
+F15,6 x 6 mm parallel key,1,Output hub; length per hub
+F16,5 mm stainless cross-pin,1,Manual override
+F17,47 mm internal bearing retainer,4,Two per bearing carrier or drawing-equivalent plates
+F18,M4 A4 enclosure screw,12,Gasketed cover; captive preferred

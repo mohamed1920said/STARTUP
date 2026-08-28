@@ -5,8 +5,8 @@
 /* ---------- wire-size aliases (canonical, never sizeof) ---------- */
 constexpr size_t TELEMETRY_WIRE_SIZE = 12;
 constexpr size_t COMMAND_WIRE_SIZE   = 8;
-constexpr size_t ACK_WIRE_SIZE       = 7;
-constexpr size_t HEARTBEAT_WIRE_SIZE = 7;
+constexpr size_t ACK_WIRE_SIZE       = 10;
+constexpr size_t HEARTBEAT_WIRE_SIZE = 17;
 
 /* ---------- error codes ---------- */
 enum class CryptoResult {
@@ -46,9 +46,10 @@ public:
 
     bool isKeySet() const { return _keySet; }
 
-    /** Build 12-byte nonce: [0,0,node_id_big16,seq_big64]. */
-    static void buildNonce(uint8_t* nonce, uint16_t nodeId, uint64_t sequence) {
+    /** Build 12-byte nonce: [packet_type,0,node_id_big16,seq_big64]. */
+    static void buildNonce(uint8_t* nonce, uint16_t nodeId, uint8_t pktType, uint64_t sequence) {
         memset(nonce, 0, GCM_IV_SIZE);
+        nonce[0] = pktType;
         nonce[2] = uint8_t(nodeId >> 8);
         nonce[3] = uint8_t(nodeId & 0xFF);
         for (int i = 0; i < 8; ++i) {

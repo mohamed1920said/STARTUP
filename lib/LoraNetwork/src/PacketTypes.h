@@ -24,7 +24,10 @@ using NodeId = uint16_t;
 inline void write16be(uint8_t* dst, uint16_t v) { dst[0]=uint8_t(v>>8); dst[1]=uint8_t(v); }
 inline void write32be(uint8_t* dst, uint32_t v) { dst[0]=uint8_t(v>>24); dst[1]=uint8_t(v>>16); dst[2]=uint8_t(v>>8); dst[3]=uint8_t(v); }
 inline uint16_t read16be(const uint8_t* src) { return uint16_t(src[0]<<8)|src[1]; }
-inline uint32_t read32be(const uint8_t* src) { return uint32_t(src[0]<<24)|uint32_t(src[1]<<16)|uint32_t(src[2]<<8)|src[3]; }
+inline uint32_t read32be(const uint8_t* src) {
+    return (uint32_t(src[0]) << 24) | (uint32_t(src[1]) << 16) |
+           (uint32_t(src[2]) << 8) | uint32_t(src[3]);
+}
 
 /* ---------- packet type enum ---------- */
 
@@ -101,44 +104,74 @@ inline void deserializeCommand(uint8_t* src, ActuatorCommand& c) {
     c.timeout_s = read16be(src+6);
 }
 
-/* ---------- AckPayload: wire = 7 bytes ---------- */
+/* ---------- AckPayload: wire = 10 bytes ---------- */
 struct AckPayload {
     uint32_t ack_seq;
     uint8_t  result;
     uint16_t battery_mv;
+    uint8_t  valve_state;
+    uint8_t  feedback_valid;
+    uint8_t  error_flags;
 } __attribute__((packed));
-CHECK_SIZE(AckPayload, 7);
+CHECK_SIZE(AckPayload, 10);
 
 inline size_t serializeAck(uint8_t* dst, const AckPayload& a) {
     write32be(dst+0, a.ack_seq);
     dst[4] = a.result;
     write16be(dst+5, a.battery_mv);
-    return 7;
+    dst[7] = a.valve_state;
+    dst[8] = a.feedback_valid;
+    dst[9] = a.error_flags;
+    return 10;
 }
 inline void deserializeAck(const uint8_t* src, AckPayload& a) {
     a.ack_seq    = read32be(src+0);
     a.result     = src[4];
     a.battery_mv = read16be(src+5);
+    a.valve_state = src[7];
+    a.feedback_valid = src[8];
+    a.error_flags = src[9];
 }
 
-/* ---------- HeartbeatPayload: wire = 7 bytes ---------- */
+/* ---------- HeartbeatPayload: wire = 17 bytes ---------- */
 struct HeartbeatPayload {
     uint32_t sequence;
     uint16_t battery_mv;
     uint8_t  valve_state;
+    uint8_t  valve_commanded;
+    uint8_t  feedback_valid;
+    uint8_t  error_flags;
+    uint16_t flow_centi_lpm;
+    uint16_t pressure_kpa;
+    uint8_t  tank_pct;
+    uint16_t pump_current_ma;
 } __attribute__((packed));
-CHECK_SIZE(HeartbeatPayload, 7);
+CHECK_SIZE(HeartbeatPayload, 17);
 
 inline size_t serializeHeartbeat(uint8_t* dst, const HeartbeatPayload& h) {
     write32be(dst+0, h.sequence);
     write16be(dst+4, h.battery_mv);
     dst[6] = h.valve_state;
-    return 7;
+    dst[7] = h.valve_commanded;
+    dst[8] = h.feedback_valid;
+    dst[9] = h.error_flags;
+    write16be(dst+10, h.flow_centi_lpm);
+    write16be(dst+12, h.pressure_kpa);
+    dst[14] = h.tank_pct;
+    write16be(dst+15, h.pump_current_ma);
+    return 17;
 }
 inline void deserializeHeartbeat(const uint8_t* src, HeartbeatPayload& h) {
     h.sequence    = read32be(src+0);
     h.battery_mv  = read16be(src+4);
     h.valve_state = src[6];
+    h.valve_commanded = src[7];
+    h.feedback_valid = src[8];
+    h.error_flags = src[9];
+    h.flow_centi_lpm = read16be(src+10);
+    h.pressure_kpa = read16be(src+12);
+    h.tank_pct = src[14];
+    h.pump_current_ma = read16be(src+15);
 }
 
 #undef CHECK_SIZE

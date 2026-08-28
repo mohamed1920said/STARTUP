@@ -1,124 +1,104 @@
-# LoRa Star Network — IoT Gateway & Sensor/Actuator Nodes
+# AMR LoRa Irrigation System
 
-A production-grade, low-power LoRa star network operating at **868 MHz** with a Central Gateway, Sensor Node, and Actuator Node, all built on ESP32 (TTGO LoRa32 v2.1 / ESP32-S3) with **SX1276** radios.
+Production-focused firmware for three device roles:
 
-## Architecture
+- ESP32-S3 central gateway
+- TTGO LoRa32 soil sensor node
+- TTGO LoRa32 actuator/valve node
 
-```
-┌─────────────────┐       LoRa (868 MHz)       ┌──────────────────┐
-│   Sensor Node   │ ──────────────────────────▶ │                  │
-│  (ESP32 + SX1276)│    AES-128-GCM encrypted   │  Central Gateway  │
-│  moisture, temp,  │                            │  (TTGO or S3)     │
-│  battery         │ ◀────────────────────────── │  ─ MQTT broker   │
-└─────────────────┘       Downlink (ACK/cmd)    │  ─ WebDashboard   │
-                                                │  ─ LittleFS SPA   │
-┌─────────────────┐       LoRa (868 MHz)       │                  │
-│  Actuator Node  │ ◀────────────────────────── │                  │
-│  (ESP32 + SX1276)│                            └──────────────────┘
-│  valve control   │
-│  CAD + listen    │
-└─────────────────┘
-```
+The gateway receives AES-128-GCM encrypted LoRa telemetry at 868 MHz, serves a local dashboard, runs automatic irrigation rules and an offline ESP32-S3 Edge-AI advisor, controls actuators, records a versioned AI-ready dataset, publishes local MQTT data, and optionally connects to an HTTPS cloud API.
 
-## Hardware
+## Firmware environments
 
-| Component | Pin |
-|-----------|-----|
-| NSS/CS    | 18  |
-| SCK       | 5   |
-| MOSI      | 27  |
-| MISO      | 19  |
-| RST       | 14  |
-| DIO0/IRQ  | 26  |
-| DIO1      | NC  |
-| Sensor moisture | GPIO34 |
-| DS18B20        | GPIO4  |
-| Battery ADC    | GPIO35 |
-| Actuator valve | GPIO2  |
-| Valve feedback | GPIO3  |
+| Environment | Hardware | Purpose |
+|---|---|---|
+| `central_gateway` | ESP32-S3-DevKitC-1-N8 | Gateway, dashboard, weather, MQTT and cloud bridge |
+| `sensor_node` | TTGO LoRa32 v2.1 | Soil moisture, DS18B20 temperature and battery telemetry |
+| `actuator_node` | TTGO LoRa32 v2.1 | Fail-safe latching-valve control, verified feedback and hydraulic telemetry |
 
-## Security
+## Wi-Fi setup
 
-- **AES-128-GCM** encryption via mbedtls
-- 12-byte random nonce per packet
-- 4-byte truncated MIC (GCM authentication tag)
-- Each node provisioned with unique 128-bit PSK
+1. Power the central gateway.
+2. Connect to the open `STARTUP-Gateway-xxxxxx` Wi-Fi network; no AP password is required.
+3. Open `http://192.168.4.1`.
+4. Use the branded setup page to select farm Wi-Fi and create an 8-32 character dashboard administrator password.
+5. After connection, sign in to the dashboard with username `admin` and the password created during setup.
 
-## Packet Format
+The dashboard, REST API, WebSocket and OTA routes remain authenticated even though the commissioning AP is open.
 
-| Field | Size |
-|-------|------|
-| Node ID | 2 bytes |
-| IV/Nonce | 12 bytes |
-| Packet Type | 1 byte |
-| Ciphertext | 11-27 bytes |
-| MIC (truncated) | 4 bytes |
-| **Total** | **30-46 bytes** |
+LoRa reception, local automation, actuator safety and CSV logging continue when
+farm Wi-Fi or internet access is unavailable. Dashboard, MQTT and cloud access
+resume after the gateway can boot on the configured farm network.
 
-## Firmware
+## Build
 
-### PlatformIO Environments
-
-| Env | Board | Radio Library |
-|-----|-------|---------------|
-| `central_gateway` | ESP32-S3 (ESP32S3DevModule) | RadioLib |
-| `central_gateway_ttgo` | TTGO LoRa32 v2.1 | LoRa (sandeepmistry) |
-| `sensor_node` | TTGO LoRa32 v2.1 | RadioLib |
-| `actuator_node` | TTGO LoRa32 v2.1 | RadioLib |
-
-### Gateway
-- WiFi station + MQTT broker + WebDashboard
-- REST API + WebSocket for real-time telemetry
-- Node provisioning via NVS
-- WeatherStation (S3 only — disabled on TTGO due to GPIO12 strapping)
-
-### Sensor Node
-- 30-second telemetry loop
-- Capacitive moisture sensor (GPIO34)
-- DS18B20 temperature (GPIO4)
-- Battery voltage (GPIO35)
-- No deep sleep
-
-### Actuator Node
-- CAD (Channel Activity Detection) + listen mode
-- Valve control (GPIO2) with feedback (GPIO3)
-- Responds to downlink commands
-
-## Quick Start
-
-```bash
-# Build & upload gateway (TTGO)
-pio run -e central_gateway_ttgo -t upload
-
-# Build & upload sensor
-pio run -e sensor_node -t upload
-
-# Build dashboard SPIFFS filesystem
-pio run -e central_gateway_ttgo -t uploadfs
+```powershell
+pio run -e central_gateway -e sensor_node -e actuator_node
 ```
 
-1. Power the gateway — connects to WiFi (`msi` SSID)
-2. Find its IP from serial output
-3. Open `http://<gateway-ip>` in a browser
-4. Provision sensor node (ID `0001`, 32-char hex PSK)
-5. Sensor telemetry auto-appears on dashboard
+## Upload the ESP32-S3 gateway
 
-## Project Structure
-
-```
-├── src/
-│   ├── central/         # Gateway firmware
-│   ├── sensor/          # Sensor node firmware
-│   └── actuator/        # Actuator node firmware
-├── lib/
-│   ├── LoraRadio/       # LoRa library wrapper (RadioLib-compatible)
-│   ├── LoraNetwork/     # CryptoEngine, PacketTypes, LoraProtocol
-│   └── WebDashboard/    # REST API + WebSocket + SPA
-├── data/                # Dashboard SPA (HTML/JS/CSS)
-├── docs/                # Architecture & security docs
-└── platformio.ini       # Build configuration
+```powershell
+pio run -e central_gateway -t upload --upload-port COM4
+pio run -e central_gateway -t uploadfs --upload-port COM4
 ```
 
-## License
+`flash_central.bat COM4` performs both gateway uploads.
 
-MIT
+This release changes the gateway partition table. The first installation must
+upload both firmware and filesystem; uploading only one will leave the
+dashboard or partition layout inconsistent.
+
+## Important protocol rule
+
+Gateway, sensor and actuator firmware must be upgraded together. ACK is 10 bytes and actuator heartbeat is 17 bytes in schema v2; mixed firmware releases cannot communicate correctly. The devices also share the same nonce layout, persistent sequence rules and replay-protection model.
+
+## Prototype data collection
+
+The authenticated dashboard's **AI Dataset** panel provides:
+
+- raw and centrally calibrated moisture values;
+- UTC epoch time, boot ID, uptime and packet sequence for traceability;
+- weather, valve commands, verified valve state, ACKs and optional hydraulics;
+- crop, growth-stage and soil metadata per sensor zone;
+- field event labels such as rain, leak, blockage and valve fault;
+- current and previous CSV downloads.
+
+Configure each sensor's real dry/wet ADC endpoints before collecting training
+data. The gateway keeps two rolling 1.25 MiB CSV segments as an outage buffer.
+Download both segments regularly or configure the HTTPS cloud connection for a
+multi-week dataset. See [AI dataset guide](docs/AI_DATASET.md).
+
+Hydraulic inputs are intentionally disabled by default. Wire and calibrate the
+real sensors, then build the actuator with `-DENABLE_HYDRAULIC_SENSORS=1`.
+
+## Edge AI
+
+The central gateway now contains a compact trained model bank for irrigation
+need, water/runtime recommendation, rain-delay scheduling, soil dry-down,
+watering-effect verification, fault detection and next-day weather prediction.
+The dashboard **Edge AI** panel explains each zone recommendation.
+
+AI control is deliberately compiled off with `EDGE_AI_ALLOW_CONTROL=0`. The
+model runs in shadow mode while the normal threshold controller and actuator
+safety limits remain independent. See [Edge-AI model and deployment guide](docs/EDGE_AI.md).
+
+## Project layout
+
+```text
+data/                 Dashboard HTML, JavaScript and CSS
+docs/                 Current architecture, wiring and security references
+hardware/central_gateway/ KiCad 10 carrier PCB, BOM, clean DRC and fabrication files
+lib/                  Required Wi-Fi, dashboard, LoRa protocol and crypto libraries
+src/central/          ESP32-S3 gateway firmware
+src/sensor/           Soil sensor firmware
+src/actuator/         Fail-safe valve actuator firmware
+platformio.ini        Three retained PlatformIO environments
+partitions_8MB.csv     Gateway OTA + 3.375 MiB LittleFS partition map
+flash_central.bat     Windows gateway upload helper
+upload_guide.txt      Upload commands and recovery notes
+```
+
+## Production note
+
+This is suitable for controlled prototype and pilot testing. It contains a trained prototype model, but simulated device/control labels do not authorize unattended irrigation. Collect representative labeled field data, retrain, validate and complete shadow-mode acceptance before permitting AI control. Commercial release still requires per-device secret provisioning, signed firmware/secure boot, watchdog and brownout validation, enclosure and power testing, fail-safe hydraulic hardware, radio/regulatory certification, and documented installation/support procedures.

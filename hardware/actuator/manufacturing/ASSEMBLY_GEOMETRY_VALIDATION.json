@@ -1,0 +1,7 @@
+{
+  "component_count": 35,
+  "unexpected_intersection_count": 0,
+  "unexpected_intersections": [],
+  "cover_excluded_from_pair_check": true,
+  "threshold_mm3": 0.05
+}

@@ -14,6 +14,8 @@ public:
     void resetSettings();
     String getSsid();
     IPAddress getLocalIP();
+    const char* getAdminUser() const { return _adminUser; }
+    const char* getAdminPassword() const { return _adminPass; }
     void loop();
     void setResetPin(uint8_t pin, bool activeLow = true, unsigned long holdMs = 5000);
 
@@ -27,6 +29,8 @@ private:
     Preferences _prefs;
     bool _apMode = false;
     unsigned long _apStart = 0;
+    char _adminUser[16] = "admin";
+    char _adminPass[33] = {0};
 
     bool loadCredentials(char* ssid, size_t ssidLen, char* pass, size_t passLen);
     bool loadStaticIP(IPAddress& ip, IPAddress& gw, IPAddress& mask, IPAddress& dns);
@@ -38,6 +42,8 @@ private:
     void handleSetupSubmit();
     String generateAPSSID();
     bool connectToSaved();
+    void ensureAdminCredentials();
+    void saveAdminPassword(const char* password);
     void checkResetButton();
     void handleReset();
 

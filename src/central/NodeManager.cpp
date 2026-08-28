@@ -9,6 +9,10 @@ static void jsonEscape(const char* src, char* dst, size_t dstSz) {
         if (c == '"' || c == '\\') {
             if (j + 2 >= dstSz) break;
             dst[j++] = '\\'; dst[j++] = c;
+        } else if (c == '\n' || c == '\r' || c == '\t' || static_cast<unsigned char>(c) < 0x20) {
+            if (j + 6 >= dstSz) break;
+            snprintf(dst + j, dstSz - j, "\\u%04X", static_cast<unsigned char>(c));
+            j += 6;
         } else {
             dst[j++] = c;
         }
@@ -24,6 +28,9 @@ void NodeManager::begin() { loadNVS(); }
 
 bool NodeManager::provision(uint16_t id, uint8_t type,
                              const uint8_t psk[16], const char* alias) {
+    if (!psk || !alias || id == 0 || (type != 0x01 && type != 0x02)) return false;
+    uint8_t derived[16];
+    if (!CryptoEngine::deriveSessionKey(psk, id, derived)) return false;
     NodeInfo* n = find(id);
     if (!n) {
         if (_count >= MAX_NODES) return false;
@@ -32,7 +39,7 @@ bool NodeManager::provision(uint16_t id, uint8_t type,
     n->id = id;
     n->type = type;
     memcpy(n->psk, psk, 16);
-    CryptoEngine::deriveSessionKey(psk, id, n->sessionKey);
+    memcpy(n->sessionKey, derived, sizeof(derived));
     n->registered = true;
     n->lastSeq = 0;
     n->lastSeen = millis();
@@ -40,17 +47,31 @@ bool NodeManager::provision(uint16_t id, uint8_t type,
     n->threshold = 50;
     n->sensorId = 0;
     n->valveOpen = false;
+    n->lastTelemetrySeq = 0;
+    n->lastAckSeq = 0;
+    n->lastHeartbeatSeq = 0;
     strncpy(n->alias, alias, 23); n->alias[23] = 0;
     saveNVS(*n);
     return true;
 }
 
-void NodeManager::handlePacket(uint16_t nodeId, PacketType type,
-                                const uint8_t* pt, size_t len, uint32_t seq) {
+bool NodeManager::handlePacket(uint16_t nodeId, PacketType type,
+                               const uint8_t* pt, size_t len, uint32_t seq) {
     NodeInfo* n = find(nodeId);
-    if (!n || !n->registered) return;
+    if (!n || !n->registered || seq == 0) return false;
+    uint32_t* streamLast = nullptr;
+    switch (type) {
+        case PacketType::SENSOR_TELEMETRY: streamLast = &n->lastTelemetrySeq; break;
+        case PacketType::ACK:              streamLast = &n->lastAckSeq; break;
+        case PacketType::HEARTBEAT:        streamLast = &n->lastHeartbeatSeq; break;
+        default: return false;
+    }
+    if (seq <= *streamLast) return false;
+    *streamLast = seq;
     n->lastSeen = millis();
     n->lastSeq = seq;
+    saveNVS(*n);
+    return true;
 }
 
 bool NodeManager::remove(uint16_t id) {
@@ -71,7 +92,11 @@ bool NodeManager::remove(uint16_t id) {
 
 bool NodeManager::setActuatorConfig(uint16_t id, bool autoMode, uint8_t threshold, uint16_t sensorId) {
     NodeInfo* n = find(id);
-    if (!n || !n->registered) return false;
+    if (!n || !n->registered || n->type != 0x02) return false;
+    if (autoMode) {
+        NodeInfo* sensor = find(sensorId);
+        if (!sensor || sensor->type != 0x01) return false;
+    }
     n->autoMode = autoMode;
     n->threshold = constrain(threshold, 0, 100);
     n->sensorId = sensorId;
@@ -106,9 +131,9 @@ std::string NodeManager::toJson() const {
     json = '[';
     for (int i = 0; i < _count; i++) {
         if (i > 0) json += ',';
-        char aliasEsc[48];
+        char aliasEsc[144];
         jsonEscape(_nodes[i].alias, aliasEsc, sizeof(aliasEsc));
-        char buf[256];
+        char buf[384];
         snprintf(buf, sizeof(buf),
             R"({"id":%u,"type":%u,"alias":"%s","registered":%s,"lastSeq":%u,"lastSeen":%u,"autoMode":%s,"threshold":%u,"sensorId":%u})",
             _nodes[i].id, _nodes[i].type, aliasEsc,
@@ -131,11 +156,9 @@ void NodeManager::loadNVS() {
         if (_count < MAX_NODES) {
             size_t sz = sizeof(NodeInfo);
             NodeInfo& ni = _nodes[_count];
+            memset(&ni, 0, sizeof(ni));
             if (nvs_get_blob(h, ei.key, &ni, &sz) == ESP_OK) {
-                _nodes[_count].autoMode = false;
-                _nodes[_count].threshold = 50;
-                _nodes[_count].sensorId = 0;
-                _nodes[_count].valveOpen = false;
+                ni.alias[sizeof(ni.alias) - 1] = 0;
                 _count++;
             }
         }

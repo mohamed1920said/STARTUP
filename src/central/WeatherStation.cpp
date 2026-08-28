@@ -5,16 +5,28 @@ volatile uint32_t WeatherStation::_windCnt   = 0;
 volatile uint32_t WeatherStation::_rainLastUs = 0;
 volatile uint32_t WeatherStation::_windLastUs = 0;
 
-// ADC -> wind direction lookup table (8 cardinal/intercardinal points)
-const WindCal WeatherStation::_adcCal[8] = {
-    {3070,   0.0f},
-    {1750,  45.0f},
-    {330,   90.0f},
-    {680,  135.0f},
-    {1055, 180.0f},
-    {2440, 225.0f},
-    {3995, 270.0f},
-    {3500, 315.0f}
+// ADC -> wind direction lookup table for the 16-position passive vane.
+// Values are calculated for the PCB's 10 kOhm pull-up, a 3.3 V ADC supply,
+// and the resistance table in the weather-station documentation. Calibrate
+// these centers with production hardware to compensate for ADC and resistor
+// tolerance before deployment.
+const WindCal WeatherStation::_adcCal[16] = {
+    {3143,   0.0f},
+    {1624,  22.5f},
+    {1845,  45.0f},
+    { 335,  67.5f},
+    { 372,  90.0f},
+    { 264, 112.5f},
+    { 738, 135.0f},
+    { 506, 157.5f},
+    {1149, 180.0f},
+    { 979, 202.5f},
+    {2520, 225.0f},
+    {2397, 247.5f},
+    {3780, 270.0f},
+    {3309, 292.5f},
+    {3548, 315.0f},
+    {2810, 337.5f}
 };
 
 WeatherStation::WeatherStation(uint8_t rainPin, uint8_t windPin, uint8_t vanePin,
@@ -99,13 +111,13 @@ WeatherData WeatherStation::read() {
     float dhtTemp   = _dhtSensor->readTemperature();
 
     // ---------- temperature & pressure (BMP280) ----------
-    float bmpTemp = 0, bmpPres = 0;
+    float bmpTemp = NAN, bmpPres = NAN;
     if (_bmpOk) {
         bmpTemp = _bmp->readTemperature();
         bmpPres = _bmp->readPressure() / 100.0f;
     }
     // Prefer BMP280 temperature over DHT11 (BMP280 is more accurate)
-    d.temperature_c = (!isnan(bmpTemp) && bmpTemp != 0) ? bmpTemp : dhtTemp;
+    d.temperature_c = isfinite(bmpTemp) ? bmpTemp : dhtTemp;
     d.pressure_hpa  = bmpPres;
 
     d.luminosity_lux = readLuminosity();
@@ -185,22 +197,18 @@ int WeatherStation::median5() {
 }
 
 // ---------- Wind direction from ADC ----------
-// Matches 8-position lookup table, then applies exponential smoothing.
+// Matches the 16-position lookup table, then applies exponential smoothing.
 float WeatherStation::calcWindDeg(int rawAdc) {
     const int ADC_TOL = 300;
     int bestDelta = 99999;
     int bestIdx   = -1;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 16; i++) {
         int delta = abs(rawAdc - _adcCal[i].adc);
         if (delta < bestDelta) { bestDelta = delta; bestIdx = i; }
     }
 
-    float deg;
-    if (bestIdx >= 0 && bestDelta <= ADC_TOL) {
-        deg = _adcCal[bestIdx].degrees;
-    } else {
-        deg = 0;  // fallback
-    }
+    if (bestIdx < 0 || bestDelta > ADC_TOL) return NAN;
+    const float deg = _adcCal[bestIdx].degrees;
 
     // Exponential smoothing (alpha = 0.25) to avoid jitter
     if (!_windDegInit) {

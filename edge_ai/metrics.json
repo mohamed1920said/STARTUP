@@ -1,0 +1,67 @@
+{
+  "validation_policy": "train=2023-2024, temporal holdout=2025",
+  "records": 6576,
+  "train_records": 4386,
+  "test_records": 2190,
+  "irrigation": {
+    "threshold": 0.545,
+    "accuracy": 0.8616438356164383,
+    "precision": 0.38687782805429866,
+    "recall": 0.8423645320197044,
+    "f1": 0.5302325581395348,
+    "false_negative_rate": 0.15763546798029557,
+    "tp": 171,
+    "tn": 1716,
+    "fp": 271,
+    "fn": 32
+  },
+  "recommended_water_mm": {
+    "mae": 1.7051294056519737,
+    "rmse": 1.9356069106432232,
+    "test_events": 203
+  },
+  "drying_rate_pct_day": {
+    "mae": 2.9868651686998824,
+    "test_days": 1556
+  },
+  "rain_next_24h": {
+    "threshold": 0.5,
+    "accuracy": 0.7115384615384616,
+    "precision": 0.305019305019305,
+    "recall": 0.7247706422018348,
+    "f1": 0.42934782608695654,
+    "false_negative_rate": 0.27522935779816515,
+    "tp": 237,
+    "tn": 1317,
+    "fp": 540,
+    "fn": 90
+  },
+  "weather_next_day": {
+    "temperature_c": {
+      "mae": 0.9782301831930281,
+      "rmse": 1.2945017280381659
+    },
+    "rain_mm": {
+      "mae": 1.206010350682234,
+      "rmse": 2.7192532020092055
+    },
+    "et0_mm": {
+      "mae": 0.55266309688814,
+      "rmse": 0.7481276988796617
+    }
+  },
+  "fault_detection": {
+    "accuracy": 1.0,
+    "macro_recall": 1.0,
+    "per_class_recall": {
+      "normal": 1.0,
+      "leak": 1.0,
+      "blocked_pipe": null,
+      "empty_tank": null,
+      "valve_fault": 1.0,
+      "sensor_fault": 1.0
+    },
+    "mean_confidence": 0.9999125034830898
+  },
+  "deployment_gate": "SHADOW_MODE_ONLY_SYNTHETIC_DEVICE_LABELS"
+}

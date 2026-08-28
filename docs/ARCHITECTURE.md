@@ -1,182 +1,85 @@
-# LoRa Star Network — Architecture Document
+# AMR System Architecture
 
-## 1. System Topology
+## Scope
 
-```
-                                      ┌──────────────────────────┐
-                                      │    MQTT Clients / Cloud  │
-                                      │    (Optional bridge)     │
-                                      └───────────┬──────────────┘
-                                                  │ Wi-Fi
-                                                  │
- ┌──────────────────────────────────────────────────────────────────┐
- │                    CENTRAL GATEWAY                                │
- │      TTGO LoRa32 v2.1 (LoRa lib)  or  ESP32-S3 (RadioLib)       │
- │                                                                  │
- │  ┌──────────┐  ┌──────────────┐  ┌──────────┐                   │
- │  │ LoRa Rx  │  │  PicoMQTT    │  │  Web     │                   │
- │  │ + Crypto │◄─┤  Local       │◄─┤  Dash-   │                   │
- │  │          │  │  Broker      │  │  board   │                   │
- │  └──────────┘  └──────────────┘  └──────────┘                   │
- │       │                                                          │
- │       │ LoRa (868 MHz, SF9, BW125, CR5, 10 dBm)                 │
- │       │                                                          │
- │  ┌────┴────────────────────────────────────────────────┐         │
- │  │  Encryption: AES-128-GCM (mbedtls)                  │         │
- │  │  Auth: 4-byte truncated GCM tag                    │         │
- │  │  Nonce: 12 bytes (4 zero + 4 node_id + 4 seq)     │         │
- │  └─────────────────────────────────────────────────────┘         │
- └──────────────────────────────────────────────────────────────────┘
-          ▲                          ▲
-          │ LoRa                     │ LoRa
-          │                          │
- ┌────────┴───────┐    ┌─────────────┴──────┐
- │  SENSOR NODE   │    │   ACTUATOR NODE    │
- │  TTGO LoRa32   │    │   TTGO LoRa32      │
- │  v2.1 (ESP32)  │    │   v2.1 (ESP32)     │
- │                │    │                    │
- │  Capacitive    │    │  Valve (GPIO2)     │
- │  moisture (34) │    │  Feedback (GPIO3)  │
- │  DS18B20 (4)   │    │  CAD + listen      │
- │  Battery (35)  │    │  Battery (35)      │
- │  No deep sleep │    │                    │
- └────────────────┘    └────────────────────┘
+The maintained product contains one ESP32-S3 central gateway and TTGO LoRa32 sensor/actuator nodes. Alternative gateway and radio-test targets are intentionally excluded.
+
+## Topology
+
+```text
+Soil sensor nodes -- encrypted LoRa telemetry --> ESP32-S3 gateway
+ESP32-S3 gateway -- encrypted LoRa commands --> actuator nodes
+Actuator nodes -- encrypted ACK/heartbeat --> ESP32-S3 gateway
+Weather sensors --> ESP32-S3 gateway
+ESP32-S3 gateway --> local dashboard + rolling CSV + MQTT + optional HTTPS cloud
 ```
 
-## 2. Hardware
+## Central gateway runtime
 
-| Component     | Pin | Node                |
-|---------------|-----|---------------------|
-| LoRa NSS/CS   | 18  | All (SPI)           |
-| LoRa SCK      | 5   | All (SPI)           |
-| LoRa MOSI     | 27  | All (SPI)           |
-| LoRa MISO     | 19  | All (SPI)           |
-| LoRa RST      | 14  | All (wired, not 23) |
-| LoRa DIO0/IRQ | 26  | All                 |
-| Moisture      | 34  | Sensor              |
-| DS18B20       | 4   | Sensor              |
-| Battery ADC   | 35  | Sensor / Actuator   |
-| Valve control | 2   | Actuator            |
-| Valve feedback| 3   | Actuator            |
+The Arduino framework runs on ESP-IDF/FreeRTOS. The gateway creates:
 
-## 3. Data Flow
+- LoRa task: core 1, priority 4, 4096-byte stack.
+- Cloud task: core 0, priority 1, 8192-byte stack.
+- Dataset task: core 0, priority 1, 6144-byte stack.
+- LoRa TX queue: 8 entries.
+- Cloud request queue: 64 entries.
+- Dataset queue: 48 typed records.
+- State mutex for persistent downlink sequences and pending commands.
 
-### Sensor → Gateway → Dashboard
+The Arduino loop services Wi-Fi management, the local MQTT broker, dashboard maintenance, and weather collection. LoRa, automation, actuator safety and CSV logging start even when the farm Wi-Fi connection is unavailable. The open commissioning AP exposes only setup routes; dashboard, MQTT and cloud services start on the configured farm network after reboot.
 
-```
-Sensor                                Gateway                        Browser
-  │                                      │                             │
-  ├─ Read moisture (GPIO34), map ADC     │                             │
-  │  to 0-100% (dry=2500, wet=400)      │                             │
-  ├─ Read DS18B20 (GPIO4) temperature   │                             │
-  ├─ Read battery (GPIO35)              │                             │
-  ├─ Build SensorTelemetry binary struct│                             │
-  ├─ AES-128-GCM encrypt (PSK, nonce)   │                             │
-  ├─ Transmit: [NodeID | IV | Cipher | MIC] ──────────────────►       │
-  │                                      ├─ radio.startReceive()      │
-  │                                      ├─ Decrypt with node's PSK   │
-  │                                      ├─ Publish to MQTT topic     │
-  │                                      ├─ Push to WebSocket         │
-  │                                      │                          ├─ Update card
-  │                                      │                          ├─ Show moisture%,
-  │   (loops every 5s)                   │                            temp, batt, RSSI
-```
+## Radio configuration
 
-### Gateway → Actuator (Downlink)
+| Parameter | Value |
+|---|---|
+| Frequency | 868.0 MHz |
+| Bandwidth | 125 kHz |
+| Spreading factor | SF9 |
+| Coding rate | 4/5 |
+| Sync word | 0x12 |
+| TX power | 10 dBm |
 
-```
-Browser                              Gateway                      Actuator
-  │                                      │                             │
-  ├─ Click toggle in dashboard           │                             │
-  ├─ WebSocket action:"toggle"           │                             │
-  │                                      ├─ Build ActuatorCommand      │
-  │                                      ├─ Encrypt with node's PSK    │
-  │                                      ├─ radio.transmit() ────────► │
-  │                                      │                             ├─ Receive, decrypt
-  │                                      │                             ├─ Toggle GPIO2
-  │                                      │                             ├─ Send ACK ──────►
-  │                                      ├─ Receive ACK                │
-  │                                      ├─ Update dashboard           │
-  │                                      ├─ radio.startReceive() re-arm│
-```
+## Packet format
 
-## 4. Firmware Environments
+| Field | Size |
+|---|---|
+| Node ID | 2 bytes |
+| AES-GCM nonce | 12 bytes |
+| Packet type | 1 byte |
+| Ciphertext | 8-17 bytes |
+| Truncated authentication tag | 4 bytes |
 
-| Env             | Board          | Radio Library      |
-|-----------------|----------------|--------------------|
-| central_gateway | ESP32-S3       | RadioLib           |
-| central_gateway_ttgo | TTGO v2.1 | LoRa (sandeepmistry) |
-| sensor_node     | TTGO v2.1      | RadioLib           |
-| actuator_node   | TTGO v2.1      | RadioLib           |
+Packet types are telemetry `0x10` (12 bytes), actuator command `0x20` (8
+bytes), ACK `0x30` (10 bytes), and heartbeat `0x40` (17 bytes). The heartbeat
+includes commanded and actual valve state, feedback validity, error flags,
+flow, line pressure, tank level and pump current. Missing optional hydraulic
+measurements use explicit sentinels rather than zero.
 
-RTL and WeatherStation are excluded on TTGO gateway (GPIO12 strapping conflict).
+## Data flow
 
-## 5. Packet Format
+Sensor telemetry is authenticated, decrypted, checked against per-stream replay state, centrally calibrated from raw ADC values, and then published to the dashboard, MQTT, automation engine, CSV logger and optional cloud queue. Valve commands are associated with a pending sequence; the displayed state follows feedback reported by the actuator rather than assuming a command succeeded.
 
-```
-┌───────┬──────────┬──────┬──────────────┬─────┐
-│Node_ID│ IV/Nonce │ Type │  Ciphertext  │ MIC │
-│2 bytes│ 12 bytes │1 byte│   variable   │4 B  │
-└───────┴──────────┴──────┴──────────────┴─────┘
+Automatic irrigation uses a per-zone threshold, 3% hysteresis and a 10-second
+per-actuator command throttle. Every open command carries a maximum runtime;
+the actuator independently forces a close when its local deadline expires.
 
-Nonce layout:
-  4 bytes zero padding | 4 bytes Node_ID | 4 bytes sequence counter
+The dataset schema is versioned and records UTC epoch milliseconds when NTP is
+available, plus uptime and a random boot ID so pre-sync samples remain
+traceable. The local CSV is authoritative when cloud delivery fails. See
+`AI_DATASET.md` for the schema and collection workflow.
 
-SensorTelemetry payload (12 bytes):
-  sequence (4) | moisture_raw (2) | moisture_pct (1) | temp_c (2) | batt_mv (2) | err (1)
-```
+## Storage
 
-## 6. Security
+- `wifi_cfg`: Wi-Fi and dashboard credentials.
+- `node_db`: provisioned nodes, PSKs, automation and replay state.
+- `lora_seq`: persistent transmit sequence reservations.
+- `cloud_cfg`: HTTPS URL, API key and trusted CA certificate.
+- `field_cfg`: moisture calibration and agronomic metadata per sensor zone.
+- LittleFS: dashboard assets plus rolling `dataset.csv` and
+  `dataset_previous.csv` files.
 
-- **Algorithm:** AES-128-GCM via mbedtls
-- **PSK:** 16 bytes per node, provisioned via dashboard WebSocket
-- **Nonce:** 12 bytes (never reused — sequence counter increments per packet)
-- **MIC:** 4-byte truncated GCM tag (`GCM_TAG_TRUNCATED` — critical fix: must match what's transmitted)
-- **AAD:** Node_ID (2 bytes) + Packet_Type (1 byte) + Sequence (4 bytes)
+The ESP32-S3 uses `partitions_8MB.csv`: two 2.25 MiB OTA application slots,
+a 3.375 MiB LittleFS partition and a coredump partition. Each CSV segment is
+limited to 1.25 MiB to preserve filesystem headroom.
 
-## 7. LoraRadio Wrapper
-
-The `lib/LoraRadio/src/LoraRadio.h` adapter wraps the Arduino LoRa library
-(sandeepmistry) with a RadioLib-compatible API, used on TTGO gateway where
-RadioLib's SX1276 receive path does not latch IRQ flags in continuous mode.
-
-```cpp
-LoraRadio radio;
-radio.begin(freq, bw, sf, cr, syncWord, power, preambleLen);
-radio.startReceive();     // enters continuous Rx
-radio.available();        // true when packet received
-radio.getPacketLength();  // byte count
-radio.readData(buf, len); // copy payload
-radio.transmit(buf, len); // blocking Tx
-```
-
-## 8. MQTT Topics
-
-| Topic pattern                          | Direction     |
-|----------------------------------------|---------------|
-| `nodes/<id>/telemetry`                 | Sensor → MQTT |
-| `nodes/<id>/control`                   | MQTT → Actuator |
-| `nodes/<id>/ack`                       | Actuator → MQTT |
-
-## 9. GPIO Mapping Reference
-
-### Sensor Node (TTGO LoRa32 v2.1)
-| Peripheral     | GPIO | Notes                        |
-|----------------|------|------------------------------|
-| LoRa NSS       | 18   | SPI CS                       |
-| LoRa SCK       | 5    | SPI Clock                    |
-| LoRa MOSI      | 27   | SPI MOSI                     |
-| LoRa MISO      | 19   | SPI MISO                     |
-| LoRa RST       | 14   | Reset                        |
-| LoRa DIO0      | 26   | IRQ                          |
-| Moisture       | 34   | ADC (dry=2500, wet=400)      |
-| DS18B20        | 4    | 1-Wire                       |
-| Battery        | 35   | ADC (via voltage divider)    |
-
-### Actuator Node (TTGO LoRa32 v2.1)
-| Peripheral     | GPIO | Notes                        |
-|----------------|------|------------------------------|
-| LoRa (same SPI)| 5,18,19,27,14,26 | same pins          |
-| Valve relay    | 2    | Active HIGH                  |
-| Valve feedback | 3    | Limit switch                 |
-| Battery        | 35   | ADC                          |
+See `WIRING.md` and `SECURITY_HANDSHAKE.md` for the hardware and protocol details.

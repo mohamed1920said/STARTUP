@@ -5,6 +5,31 @@
 #include <esp_system.h>
 #include <WiFi.h>
 #include <Update.h>
+#include <cctype>
+
+namespace {
+struct RequestBody {
+    String json;
+    bool overflow = false;
+};
+
+void collectJsonBody(AsyncWebServerRequest* request, uint8_t* data, size_t len,
+                     size_t index, size_t total) {
+    if (index == 0) request->_tempObject = new RequestBody();
+    auto* body = static_cast<RequestBody*>(request->_tempObject);
+    if (!body) return;
+    if (total > 4096 || body->json.length() + len > 4096) {
+        body->overflow = true;
+        return;
+    }
+    body->json.concat(reinterpret_cast<const char*>(data), len);
+}
+
+void jsonFloat(char* dst, size_t size, float value, unsigned decimals) {
+    if (isnan(value) || isinf(value)) strlcpy(dst, "null", size);
+    else snprintf(dst, size, "%.*f", static_cast<int>(decimals), value);
+}
+}
 
 WebDashboard::WebDashboard() {}
 
@@ -16,10 +41,13 @@ bool WebDashboard::initLittleFS() {
     return true;
 }
 
-void WebDashboard::begin(AsyncWebServer& server) {
+void WebDashboard::begin(AsyncWebServer& server, const char* username, const char* password) {
     _server = &server;
+    _username = username ? username : "admin";
+    _password = password ? password : "";
     if (!initLittleFS()) return;
     _ws = new AsyncWebSocket("/ws");
+    _ws->setAuthentication(_username, _password);
     _ws->onEvent([this](AsyncWebSocket* srv, AsyncWebSocketClient* client,
                          AwsEventType type, void* arg,
                          uint8_t* data, size_t len) {
@@ -34,6 +62,15 @@ void WebDashboard::begin(AsyncWebServer& server) {
 
 void WebDashboard::loop() {
     if (_ws) _ws->cleanupClients(3);
+    if (_otaRestartPending && millis() >= _otaRestartAt) ESP.restart();
+}
+
+bool WebDashboard::authorize(AsyncWebServerRequest* request) const {
+    if (_password.length() && !request->authenticate(_username.c_str(), _password.c_str())) {
+        request->requestAuthentication();
+        return false;
+    }
+    return true;
 }
 
 void WebDashboard::onWsEvent(AsyncWebSocket* server,
@@ -67,7 +104,11 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
                         const char* psk_str = doc["psk"];
                         const char* type = doc["node_type"];
                         const char* alias = doc["alias"] | "";
-                        if (psk_str && strlen(psk_str) == 32 && _provision_cb) {
+                        bool validHex = psk_str && strlen(psk_str) == 32;
+                        for (size_t i = 0; validHex && i < 32; ++i) validHex = isxdigit((unsigned char)psk_str[i]);
+                        bool validType = type && (strcmp(type, "sensor") == 0 || strcmp(type, "actuator") == 0);
+                        bool validAlias = alias && strlen(alias) <= 23;
+                        if (nid != 0 && validHex && validType && validAlias && _provision_cb) {
                             uint8_t psk[16];
                             for (int i = 0; i < 16; i++) {
                                 char byte_str[3] = {psk_str[i*2], psk_str[i*2+1], 0};
@@ -92,31 +133,46 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
 
 void WebDashboard::pushSensorTelemetry(const SensorTelemetryData& d) {
     if (!_ws) return;
-    char buf[256];
+    char buf[320];
     std::snprintf(buf, sizeof(buf),
-        R"({"type":"sensor","id":%u,"moisture":%.1f,"temp":%.2f,)"
-        R"("batt":%.2f,"seq":%u,"rssi":%u,"ts":%u})",
-        (unsigned)d.node_id, d.moisture_percent, d.temperature_c,
-        d.battery_v, d.sequence, (unsigned)d.rssi, d.timestamp);
+        R"({"type":"sensor","id":%u,"moisture_raw":%u,"moisture":%.1f,"temp":%.2f,)"
+        R"("batt":%.2f,"seq":%u,"rssi":%d,"errors":%u,"ts":%u,"epoch_ms":%llu})",
+        (unsigned)d.node_id, (unsigned)d.moisture_raw, d.moisture_percent, d.temperature_c,
+        d.battery_v, d.sequence, (int)d.rssi, d.error_flags, d.timestamp,
+        static_cast<unsigned long long>(d.epoch_ms));
     _ws->textAll(buf);
 }
 void WebDashboard::pushWeatherTelemetry(const WeatherTelemetryData& d) {
     if (!_ws) return;
-    char buf[256];
-    auto val = [](float v) { return isnan(v) || isinf(v) ? 0.0f : v; };
+    char buf[384];
+    char rain[20], wind[20], temp[20], hum[20], pres[20], lux[20], bat[20], dir[12];
+    jsonFloat(rain, sizeof(rain), d.rain_mm, 2);
+    jsonFloat(wind, sizeof(wind), d.wind_speed_ms, 2);
+    jsonFloat(temp, sizeof(temp), d.temperature_c, 1);
+    jsonFloat(hum, sizeof(hum), d.humidity_pct, 1);
+    jsonFloat(pres, sizeof(pres), d.pressure_hpa, 1);
+    jsonFloat(lux, sizeof(lux), d.luminosity_lux, 0);
+    jsonFloat(bat, sizeof(bat), d.battery_mv, 0);
+    if (d.wind_dir_deg < 0) strlcpy(dir, "null", sizeof(dir));
+    else snprintf(dir, sizeof(dir), "%d", d.wind_dir_deg);
     std::snprintf(buf, sizeof(buf),
-        R"({"type":"weather","rain":%.2f,"wind":%.2f,"dir":%u,"temp":%.1f,"hum":%.1f,"pres":%.1f,"lux":%.0f,"bat":%.0f,"ts":%u})",
-        val(d.rain_mm), val(d.wind_speed_ms), d.wind_dir_deg, val(d.temperature_c),
-        val(d.humidity_pct), val(d.pressure_hpa), val(d.luminosity_lux), val(d.battery_mv),
-        (unsigned)millis());
+        R"({"type":"weather","rain":%s,"wind":%s,"dir":%s,"temp":%s,"hum":%s,"pres":%s,"lux":%s,"bat":%s,"ts":%u,"epoch_ms":%llu})",
+        rain, wind, dir, temp, hum, pres, lux, bat,
+        (unsigned)d.timestamp, static_cast<unsigned long long>(d.epoch_ms));
     _ws->textAll(buf);
 }
 void WebDashboard::pushActuatorState(const ActuatorStateData& d) {
     if (!_ws) return;
-    char buf[192];
+    char buf[384];
+    auto val = [](float value) { return isnan(value) || isinf(value) ? -1.0f : value; };
     std::snprintf(buf, sizeof(buf),
-        R"({"type":"actuator","id":%u,"valve":%s,"batt":%.2f,"ts":%u})",
-        d.node_id, d.valve_open ? "true" : "false", d.battery_v, d.timestamp);
+        R"({"type":"actuator","id":%u,"valve":%s,"commanded":%s,"feedback_valid":%s,)"
+        R"("batt":%.2f,"flow_lpm":%.2f,"pressure_bar":%.2f,"tank_pct":%.1f,)"
+        R"("pump_current_a":%.2f,"errors":%u,"ts":%u,"epoch_ms":%llu})",
+        d.node_id, d.valve_open ? "true" : "false",
+        d.valve_commanded_open ? "true" : "false", d.feedback_valid ? "true" : "false",
+        d.battery_v, val(d.flow_lpm), val(d.line_pressure_bar), val(d.tank_pct), val(d.pump_current_a),
+        d.error_flags, d.timestamp, static_cast<unsigned long long>(d.epoch_ms));
     _ws->textAll(buf);
 }
 void WebDashboard::pushRaw(const char* json) {
@@ -133,8 +189,10 @@ void WebDashboard::pushLog(const char* level, const char* message) {
 }
 
 void WebDashboard::serveStaticFiles() {
-    _server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-    _server->onNotFound([](AsyncWebServerRequest* request) {
+    _server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html")
+        .setAuthentication(_username, _password);
+    _server->onNotFound([this](AsyncWebServerRequest* request) {
+        if (!authorize(request)) return;
         if (request->method() == HTTP_OPTIONS) {
             request->send(200);
         } else {
@@ -151,68 +209,168 @@ void WebDashboard::registerApiHandlers() {
         json += ",\"rssi\":" + String(WiFi.RSSI());
         json += "}";
         request->send(200, "application/json", json);
-    });
+    }).setAuthentication(_username, _password);
     _server->on("/api/nodes", HTTP_GET, [this](AsyncWebServerRequest* request) {
         if (_nodesProvider) {
             request->send(200, "application/json", _nodesProvider().c_str());
         } else {
             request->send(200, "application/json", "[]");
         }
-    });
+    }).setAuthentication(_username, _password);
     _server->on("/api/cloud-config", HTTP_GET, [this](AsyncWebServerRequest* request) {
         if (_cloudCfgProvider) {
             request->send(200, "application/json", _cloudCfgProvider().c_str());
         } else {
             request->send(200, "application/json", "{}");
         }
-    });
+    }).setAuthentication(_username, _password);
     _server->on("/api/cloud-config", HTTP_POST,
-        [](AsyncWebServerRequest* request) {},
-        nullptr,
-        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+        [this](AsyncWebServerRequest* request) {
+            auto* body = static_cast<RequestBody*>(request->_tempObject);
+            if (!body || body->overflow) {
+                delete body; request->_tempObject = nullptr;
+                request->send(413, "application/json", R"({"error":"body_too_large"})"); return;
+            }
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, data, len);
+            DeserializationError err = deserializeJson(doc, body->json);
+            delete body; request->_tempObject = nullptr;
             if (err) { request->send(400, "application/json", R"({"error":"bad_json"})"); return; }
             const char* url = doc["url"] | "";
             const char* apiKey = doc["apiKey"] | "";
-            if (_cloudCfgUpdate_cb) _cloudCfgUpdate_cb(url, apiKey);
+            const char* caCert = doc["caCert"] | "";
+            if (strlen(url) >= 128 || strlen(apiKey) >= 64 || strlen(caCert) >= 2048) {
+                request->send(400, "application/json", R"({"error":"invalid_length"})"); return;
+            }
+            if (url[0] && strncmp(url, "https://", 8) != 0) {
+                request->send(400, "application/json", R"({"error":"https_required"})"); return;
+            }
+            if (_cloudCfgUpdate_cb) _cloudCfgUpdate_cb(url, apiKey, caCert);
             request->send(200, "application/json", R"({"status":"ok"})");
-        });
+        },
+        nullptr,
+        collectJsonBody).setAuthentication(_username, _password);
+    _server->on("/api/dataset/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        const std::string status = _datasetStatusProvider ? _datasetStatusProvider() : "{}";
+        request->send(200, "application/json", status.c_str());
+    }).setAuthentication(_username, _password);
+    _server->on("/api/ai/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        const std::string status = _aiStatusProvider ? _aiStatusProvider() : "{}";
+        request->send(200, "application/json", status.c_str());
+    }).setAuthentication(_username, _password);
+    _server->on("/api/dataset/export", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        const bool archive = request->hasParam("archive") && request->getParam("archive")->value() == "1";
+        const String& path = archive ? _datasetArchivePath : _datasetPath;
+        if (path.isEmpty() || !LittleFS.exists(path)) {
+            request->send(404, "application/json", R"({"error":"dataset_not_found"})");
+            return;
+        }
+        request->send(LittleFS, path, "text/csv", true);
+    }).setAuthentication(_username, _password);
+    _server->on("/api/dataset/label", HTTP_POST,
+        [this](AsyncWebServerRequest* request) {
+            auto* body = static_cast<RequestBody*>(request->_tempObject);
+            if (!body || body->overflow) {
+                delete body; request->_tempObject = nullptr;
+                request->send(413, "application/json", R"({"error":"body_too_large"})"); return;
+            }
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, body->json);
+            delete body; request->_tempObject = nullptr;
+            const char* label = doc["label"] | "";
+            const char* notes = doc["notes"] | "";
+            if (err || !label[0] || strlen(label) >= 24 || strlen(notes) >= 80 ||
+                !_datasetLabel_cb || !_datasetLabel_cb(label, notes)) {
+                request->send(400, "application/json", R"({"error":"invalid_label"})"); return;
+            }
+            request->send(200, "application/json", R"({"status":"ok"})");
+        }, nullptr, collectJsonBody).setAuthentication(_username, _password);
+    _server->on("/api/dataset", HTTP_DELETE, [this](AsyncWebServerRequest* request) {
+        if (!_datasetClear_cb || !_datasetClear_cb()) {
+            request->send(500, "application/json", R"({"error":"clear_failed"})"); return;
+        }
+        request->send(200, "application/json", R"({"status":"cleared"})");
+    }).setAuthentication(_username, _password);
+    _server->on("/api/field-config", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        const std::string config = _fieldCfgProvider ? _fieldCfgProvider() : "[]";
+        request->send(200, "application/json", config.c_str());
+    }).setAuthentication(_username, _password);
+    _server->on("/api/field-config", HTTP_POST,
+        [this](AsyncWebServerRequest* request) {
+            auto* body = static_cast<RequestBody*>(request->_tempObject);
+            if (!body || body->overflow) {
+                delete body; request->_tempObject = nullptr;
+                request->send(413, "application/json", R"({"error":"body_too_large"})"); return;
+            }
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, body->json);
+            delete body; request->_tempObject = nullptr;
+            const uint16_t nodeId = doc["node_id"] | 0;
+            const uint16_t dryRaw = doc["dry_raw"] | 2500;
+            const uint16_t wetRaw = doc["wet_raw"] | 400;
+            const char* crop = doc["crop"] | "unknown";
+            const char* stage = doc["growth_stage"] | "unknown";
+            const char* soil = doc["soil_type"] | "unknown";
+            const float area = doc["zone_area_m2"] | 0.0f;
+            const float emitter = doc["emitter_flow_lph"] | 0.0f;
+            if (err || !_fieldCfgUpdate_cb ||
+                !_fieldCfgUpdate_cb(nodeId, dryRaw, wetRaw, crop, stage, soil, area, emitter)) {
+                request->send(400, "application/json", R"({"error":"invalid_field_config"})"); return;
+            }
+            request->send(200, "application/json", R"({"status":"ok"})");
+        }, nullptr, collectJsonBody).setAuthentication(_username, _password);
     _server->on("/api/restart", HTTP_POST, [](AsyncWebServerRequest* request) {
         request->send(200, "application/json", R"({"status":"restarting"})");
         delay(100);
         ESP.restart();
-    });
+    }).setAuthentication(_username, _password);
     _server->on("/api/control", HTTP_POST,
-        [](AsyncWebServerRequest* request) {},
-        nullptr,
-        [this](AsyncWebServerRequest* request, uint8_t* data,
-                size_t len, size_t index, size_t total) {
+        [this](AsyncWebServerRequest* request) {
+            auto* body = static_cast<RequestBody*>(request->_tempObject);
+            if (!body || body->overflow) {
+                delete body; request->_tempObject = nullptr;
+                request->send(413, "application/json", R"({"error":"body_too_large"})"); return;
+            }
             JsonDocument doc;
-            DeserializationError err = deserializeJson(doc, data, len);
+            DeserializationError err = deserializeJson(doc, body->json);
+            delete body; request->_tempObject = nullptr;
             if (err) { request->send(400, "application/json", R"({"error":"bad_json"})"); return; }
             uint16_t nid = doc["node_id"] | 0;
-            bool on = doc["value"] | false;
-            if (_control_cb) _control_cb(nid, on);
+            if (nid == 0 || !doc["value"].is<bool>()) {
+                request->send(400, "application/json", R"({"error":"invalid_control"})"); return;
+            }
+            if (_control_cb) _control_cb(nid, doc["value"].as<bool>());
             request->send(200, "application/json", R"({"status":"ok"})");
-        });
+        },
+        nullptr,
+        collectJsonBody).setAuthentication(_username, _password);
 }
 
 void WebDashboard::registerOtaHandler() {
     _server->on("/api/ota/upload", HTTP_POST,
-        [](AsyncWebServerRequest* request) {
-            request->send(200, "application/json", R"({"status":"ok","msg":"upload started"})");
+        [this](AsyncWebServerRequest* request) {
+            if (_otaOk) {
+                request->send(200, "application/json", R"({"status":"ok","msg":"firmware verified; restarting"})");
+                _otaRestartAt = millis() + 750;
+                _otaRestartPending = true;
+            } else {
+                request->send(500, "application/json", R"({"status":"error","msg":"firmware update failed"})");
+            }
         },
-        [](AsyncWebServerRequest* request, const String& filename,
+        [this](AsyncWebServerRequest* request, const String& filename,
             size_t index, uint8_t* data, size_t len, bool final) {
             if (!index) {
                 log_i("OTA: %s (%u bytes)", filename.c_str(), request->contentLength());
-                if (!Update.begin(request->contentLength(), U_FLASH)) log_e("OTA begin failed");
+                _otaOk = Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH);
+                if (!_otaOk) log_e("OTA begin failed");
             }
-            if (Update.write(data, len) != len) log_e("OTA write failed");
+            if (_otaOk && Update.write(data, len) != len) {
+                _otaOk = false;
+                log_e("OTA write failed");
+            }
             if (final) {
-                if (Update.end(true)) { log_i("OTA success"); delay(1000); ESP.restart(); }
-                else { log_e("OTA end failed: %s", Update.errorString()); request->send(500, "text/plain", "OTA failed"); }
+                _otaOk = _otaOk && Update.end(true) && !Update.hasError();
+                if (_otaOk) log_i("OTA success");
+                else log_e("OTA end failed: %s", Update.errorString());
             }
-        });
+        }).setAuthentication(_username, _password);
 }

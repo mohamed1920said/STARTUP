@@ -1,6 +1,8 @@
 #include "WiFiManager.h"
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
+#include <esp_system.h>
+#include "StartupLogo.h"
 
 const char* WiFiManager::AP_SSID_PREFIX = "STARTUP-Gateway-";
 const char* WiFiManager::NVS_NAMESPACE  = "wifi_cfg";
@@ -12,6 +14,7 @@ WiFiManager::WiFiManager() {
 void WiFiManager::begin(AsyncWebServer& server) {
     _server = &server;
     _prefs.begin(NVS_NAMESPACE, false);
+    ensureAdminCredentials();
 
     char ssid[33] = {0}, pass[65] = {0};
     bool hasCreds = loadCredentials(ssid, sizeof(ssid), pass, sizeof(pass));
@@ -26,6 +29,27 @@ void WiFiManager::begin(AsyncWebServer& server) {
     bool useStatic = loadStaticIP(ip, gw, mask, dns);
 
     tryConnect(ssid, pass, useStatic, ip, gw, mask, dns);
+}
+
+void WiFiManager::ensureAdminCredentials() {
+    String saved = _prefs.getString("adminPass", "");
+    if (saved.length() >= 8 && saved.length() < sizeof(_adminPass)) {
+        strlcpy(_adminPass, saved.c_str(), sizeof(_adminPass));
+        return;
+    }
+    uint32_t a = esp_random();
+    uint32_t b = esp_random();
+    snprintf(_adminPass, sizeof(_adminPass), "%08lX%08lX",
+             (unsigned long)a, (unsigned long)b);
+    _prefs.putString("adminPass", _adminPass);
+    Serial.printf("[WM] New dashboard login: user=%s password=%s\n", _adminUser, _adminPass);
+    Serial.println(F("[WM] Save this password, or replace it during WiFi setup."));
+}
+
+void WiFiManager::saveAdminPassword(const char* password) {
+    if (!password || strlen(password) < 8 || strlen(password) >= sizeof(_adminPass)) return;
+    strlcpy(_adminPass, password, sizeof(_adminPass));
+    _prefs.putString("adminPass", _adminPass);
 }
 
 bool WiFiManager::waitForConnection(unsigned long timeoutMs) {
@@ -203,8 +227,9 @@ void WiFiManager::startAP() {
     String apSsid = generateAPSSID();
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
-    WiFi.softAP(apSsid.c_str(), NULL, 1, 0, 1);
-    Serial.printf("[WM] AP started: %s @ 192.168.4.1\n", apSsid.c_str());
+    WiFi.softAP(apSsid.c_str(), nullptr, 1, 0, 1);
+    Serial.printf("[WM] Open AP started: %s @ 192.168.4.1 (no password)\n",
+                  apSsid.c_str());
 
     _dns.start(53, "*", IPAddress(192, 168, 4, 1));
 
@@ -268,8 +293,9 @@ void WiFiManager::serveSetupPage() {
                 "box-shadow:0 2px 8px rgba(0,0,0,0.15);text-align:center}"
                 "h2{color:#2E7D32}.ip{font-size:24px;font-weight:bold;color:#1976D2;margin:16px 0;padding:12px;"
                 "background:#E3F2FD;border-radius:4px}.note{color:#666;font-size:13px}</style></head><body>"
-                "<div class='card'><h2>&#10003; Connected!</h2>"
-                "<p>Gateway joined <b>" + WiFi.SSID() + "</b></p>"
+                "<div class='card'><img src='" + String(STARTUP_LOGO_DATA_URI) + "' alt='STARTUP' style='width:220px;max-width:80%;height:auto'>"
+                "<h2>&#10003; Connected!</h2>"
+                "<p>Gateway joined the configured WiFi network.</p>"
                 "<div class='ip'><a href='http://" + _configIP.toString() + "'>http://" + _configIP.toString() + "</a></div>"
                 "<p class='note'>Rebooting in 30 seconds. Dashboard will be available at the address above.</p>"
                 "</div></body></html>";
@@ -322,12 +348,15 @@ function toggleAdvanced(){var e=document.getElementById('advanced');e.style.disp
 </head>
 <body>
 <div class="card">
-<h2>STARTUP Gateway Setup</h2>
+<img src="%STARTUP_LOGO%" alt="STARTUP" style="display:block;width:240px;max-width:82%;height:auto;margin:0 auto 8px">
+<h2>Gateway Setup</h2>
 <form action="/api/setup" method="post">
 <label for="ssid">WiFi Network</label>
 <input type="text" id="ssid" name="ssid" placeholder="SSID" required>
 <label for="pass">Password</label>
 <input type="password" id="pass" name="pass" placeholder="Password">
+<label for="adminpass">Dashboard administrator password</label>
+<input type="password" id="adminpass" name="adminpass" placeholder="Minimum 8 characters" minlength="8" maxlength="32" required>
 <div class="advanced-toggle" onclick="toggleAdvanced()">Advanced: Static IP &#9660;</div>
 <div class="advanced" id="advanced">
 <label for="ip">IP Address</label>
@@ -346,6 +375,7 @@ function toggleAdvanced(){var e=document.getElementById('advanced');e.style.disp
 </body>
 </html>
 )rawliteral";
+        html.replace("%STARTUP_LOGO%", STARTUP_LOGO_DATA_URI);
         request->send(200, "text/html", html);
     });
 
@@ -359,6 +389,7 @@ void WiFiManager::handleSetupSubmit() {
         [this](AsyncWebServerRequest* request) {
             String ssid = request->arg("ssid");
             String pass = request->arg("pass");
+            String adminPass = request->arg("adminpass");
             String ip   = request->arg("ip");
             String gw   = request->arg("gw");
             String mask = request->arg("mask");
@@ -371,8 +402,16 @@ void WiFiManager::handleSetupSubmit() {
                     "<a href='/'>Go back</a></body></html>");
                 return;
             }
+            if (adminPass.length() < 8 || adminPass.length() > 32) {
+                request->send(400, "text/html",
+                    "<html><body style='font-family:Arial;padding:20px;text-align:center'>"
+                    "<h2 style='color:#C62828'>Error</h2><p>Administrator password must contain 8-32 characters.</p>"
+                    "<a href='/'>Go back</a></body></html>");
+                return;
+            }
 
             saveCredentials(ssid.c_str(), pass.c_str());
+            saveAdminPassword(adminPass.c_str());
             if (ip.length() > 0) saveStaticIP(ip.c_str(), gw.c_str(), mask.c_str(), dns.c_str());
             else saveStaticIP("", "", "", "");
 
@@ -387,7 +426,7 @@ void WiFiManager::handleSetupSubmit() {
                 "</style></head><body>"
                 "<div class='card'>"
                 "<h2 style='color:#E65100'>Configuration Saved</h2>"
-                "<p>Gateway will now try to connect to <b>" + ssid + "</b>.</p>"
+                "<p>Gateway will now try to connect to the configured WiFi network.</p>"
                 "<p style='font-size:13px;color:#666'>The setup page will show the dashboard address once connected.</p>"
                 "</div></body></html>";
             request->send(200, "text/html", html);

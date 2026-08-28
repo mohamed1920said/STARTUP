@@ -41,22 +41,22 @@ Admin                           Gateway
 ### Nonce Structure
 
 ```
-[0x00, 0x00, 0x00, 0x00 | node_id_hi, node_id_lo | seq_bytes...]
-  4 bytes zero padding     2 bytes node ID         4 bytes counter
+[packet_type | 0x00 | node_id_hi, node_id_lo | sequence (64-bit field)]
+    1 byte     1 byte          2 bytes                 8 bytes
 ```
 
-The 4-byte zero prefix ensures uniqueness even if node_id overlaps
-with the sequence counter space. The 32-bit sequence counter
-guarantees a unique nonce for every packet from a given node.
+Packet type separates ACK, heartbeat, telemetry, and command nonce spaces.
+Each transmitter reserves persistent sequence ranges in NVS so a reboot skips
+unused values rather than reusing a nonce. A packet stream must stop and be
+re-keyed before its 32-bit counter is exhausted.
 
 ### Encryption (Sensor)
 
 ```cpp
-CryptoEngine crypto;
-crypto.begin(psk, 16);
-LoraFrame frame;
-crypto.encrypt(plaintext, len, pkt_type, seq_counter, node_id, frame);
-// frame.iv, frame.ciphertext, frame.mic populated
+LoraCrypto crypto;
+crypto.setKey(psk, 16);
+crypto.encrypt(plaintext, len, pkt_type, seq_counter, node_id, iv, mic);
+// plaintext now contains ciphertext; iv and truncated mic are populated
 ```
 
 ### Decryption (Gateway)
@@ -64,12 +64,12 @@ crypto.encrypt(plaintext, len, pkt_type, seq_counter, node_id, frame);
 ```cpp
 const uint8_t* psk = nodeMgr.getPsk(nodeId);
 if (!psk) { /* unknown node */ return; }
-CryptoEngine crypto;
-crypto.begin(psk, 16);
+LoraCrypto crypto;
+crypto.setKey(psk, 16);
 crypto.decrypt(ciphertext, len, pkt_type, seq, nodeId, iv, mic);
 ```
 
-## Critical Implementation Detail
+## Authentication-tag implementation detail
 
 The gateway's `CryptoEngine::decrypt()` originally passed `GCM_TAG_SIZE` (16)
 as the `tag_len` parameter to `mbedtls_gcm_auth_decrypt`, but only 4 bytes
@@ -81,10 +81,10 @@ making authentication always fail.
 
 ## Replay Protection
 
-- Sensor maintains a monotonic 32-bit sequence counter (increments per
-  `sendTelemetry()` call, persisted in RAM).
-- Gateway's `NodeManager` tracks the last sequence per node.
-- Packets with `seq ≤ last_seq` are dropped.
+- Sensor, actuator, and gateway reserve monotonic sequence ranges in NVS.
+- Gateway tracks telemetry, heartbeat, and ACK sequences independently per node.
+- Packets with `seq ≤ last_seq` for that node and packet stream are dropped.
+- Actuator persists the last accepted command sequence and drops older commands after reboot.
 - Counter wraps after ~4 billion packets (negligible risk at 5s interval).
 
 ## Security Properties

@@ -1,0 +1,629 @@
+EESchema Schematic File Version 4
+LIBS:AMR_Central
+EELAYER 29 0
+EELAYER END
+$Descr A4 11693 8268
+encoding utf-8
+Sheet 1 1
+Title "AMR Central Gateway ESP32-S3 Carrier"
+Date "2026-08-08"
+Rev "1.0-prototype"
+Comp "AMR IoT Platform"
+Comment1 "7-18V input; RFM95W 868MHz; protected weather interfaces"
+Comment2 "Firmware pin map: src/central/main.cpp"
+Comment3 "Prototype: engineering review required before sale"
+Comment4 "Four-layer, 1.6mm FR-4; In1 and bottom GND planes"
+$EndDescr
+Text Notes 700 700 0    100  ~ 20
+CENTRAL GATEWAY - ESP32-S3 DEVKITC-1 CARRIER
+Text Notes 700 900 0    55   ~ 0
+All GPIO names and connector nets match the compiled central firmware.
+$Comp
+L AMR_Central:ESP32_S3_DEVKITC_1 U1
+U 1 1 F81F14C9
+P 3000 3800
+F 0 "U1" H 3000 3550 50  0000 C CNN
+F 1 "ESP32-S3-DevKitC-1-N8R8" H 3000 4050 50  0000 C CNN
+F 2 "AMR_Central:ESP32-S3-DevKitC-1_Carrier" H 3000 3800 50  0001 C CNN
+F 3 "" H 3000 3800 50  0001 C CNN
+	1    3000 3800
+	1    0    0    -1
+$EndComp
+NoConn ~ 2100 2750
+NoConn ~ 2100 2850
+NoConn ~ 2100 2950
+Text Label 2100 3050 0    40   ~ 0
+I2C_SDA_GPIO
+Text Label 2100 3150 0    40   ~ 0
+I2C_SCL_GPIO
+Text Label 2100 3250 0    40   ~ 0
+RAIN_GPIO
+Text Label 2100 3350 0    40   ~ 0
+DHT_GPIO
+NoConn ~ 2100 3450
+NoConn ~ 2100 3550
+NoConn ~ 2100 3650
+Text Label 2100 3750 0    40   ~ 0
+LORA_NSS
+Text Label 2100 3850 0    40   ~ 0
+BATT_ADC
+Text Label 2100 3950 0    40   ~ 0
+WIND_GPIO
+NoConn ~ 2100 4050
+Text Label 2100 4150 0    40   ~ 0
+LDR_ADC
+Text Label 2100 4250 0    40   ~ 0
+VANE_ADC
+Text Label 2100 4350 0    40   ~ 0
+LORA_MOSI
+Text Label 2100 4450 0    40   ~ 0
+LORA_SCK
+Text Label 2100 4550 0    40   ~ 0
+LORA_MISO
+Text Label 2100 4650 0    40   ~ 0
+LORA_RST
+Text Label 2100 4750 0    40   ~ 0
++5V
+Text Label 2100 4850 0    40   ~ 0
+GND
+Text Label 3900 2750 2    40   ~ 0
+GND
+Text Label 3900 2850 2    40   ~ 0
+UART_TX
+Text Label 3900 2950 2    40   ~ 0
+UART_RX
+NoConn ~ 3900 3050
+Text Label 3900 3150 2    40   ~ 0
+LORA_DIO0
+NoConn ~ 3900 3250
+NoConn ~ 3900 3350
+NoConn ~ 3900 3450
+NoConn ~ 3900 3550
+NoConn ~ 3900 3650
+NoConn ~ 3900 3750
+NoConn ~ 3900 3850
+NoConn ~ 3900 3950
+Text Label 3900 4050 2    40   ~ 0
+SETUP_RESET
+NoConn ~ 3900 4150
+NoConn ~ 3900 4250
+NoConn ~ 3900 4350
+NoConn ~ 3900 4450
+NoConn ~ 3900 4550
+NoConn ~ 3900 4650
+Text Label 3900 4750 2    40   ~ 0
+GND
+Text Label 3900 4850 2    40   ~ 0
+GND
+$Comp
+L AMR_Central:RFM95W U2
+U 1 1 D59E2DDE
+P 6200 3400
+F 0 "U2" H 6200 3150 50  0000 C CNN
+F 1 "RFM95W-868S2" H 6200 3650 50  0000 C CNN
+F 2 "AMR_Central:HOPERF_RFM95W_SMD" H 6200 3400 50  0001 C CNN
+F 3 "" H 6200 3400 50  0001 C CNN
+	1    6200 3400
+	1    0    0    -1
+$EndComp
+Text Label 5500 3050 0    40   ~ 0
+GND
+Text Label 5500 3150 0    40   ~ 0
+LORA_MISO
+Text Label 5500 3250 0    40   ~ 0
+LORA_MOSI
+Text Label 5500 3350 0    40   ~ 0
+LORA_SCK
+Text Label 5500 3450 0    40   ~ 0
+LORA_NSS
+Text Label 5500 3550 0    40   ~ 0
+LORA_RST
+NoConn ~ 5500 3650
+Text Label 5500 3750 0    40   ~ 0
+GND
+NoConn ~ 6900 3050
+Text Label 6900 3150 2    40   ~ 0
+LORA_DIO1
+Text Label 6900 3250 2    40   ~ 0
+LORA_DIO0
+Text Label 6900 3350 2    40   ~ 0
++3V3_PERIPH
+NoConn ~ 6900 3450
+NoConn ~ 6900 3550
+Text Label 6900 3650 2    40   ~ 0
+GND
+Text Label 6900 3750 2    40   ~ 0
+LORA_ANT
+$Comp
+L AMR_Central:SMA J9
+U 1 1 EE1FC099
+P 7800 3800
+F 0 "J9" H 7800 3550 50  0000 C CNN
+F 1 "SMA 868MHz" H 7800 4050 50  0000 C CNN
+F 2 "AMR_Central:SMA_Vertical_THT" H 7800 3800 50  0001 C CNN
+F 3 "" H 7800 3800 50  0001 C CNN
+	1    7800 3800
+	1    0    0    -1
+$EndComp
+Text Label 7500 3700 0    40   ~ 0
+LORA_ANT
+Text Label 7500 3900 0    40   ~ 0
+GND
+Text Notes 5100 900 0    70   ~ 12
+PROTECTED FIELD POWER
+$Comp
+L AMR_Central:CONN_1X2 J1
+U 1 1 F0D89E8C
+P 5200 1300
+F 0 "J1" H 5200 1050 50  0000 C CNN
+F 1 "POWER 7-18V DC" H 5200 1550 50  0000 C CNN
+F 2 "AMR_Central:TerminalBlock_2" H 5200 1300 50  0001 C CNN
+F 3 "" H 5200 1300 50  0001 C CNN
+	1    5200 1300
+	1    0    0    -1
+$EndComp
+Text Label 4900 1225 0    40   ~ 0
+VIN_RAW
+Text Label 4900 1375 0    40   ~ 0
+GND
+$Comp
+L AMR_Central:FUSE F1
+U 1 1 90CDAD75
+P 6000 1200
+F 0 "F1" H 6000 950 50  0000 C CNN
+F 1 "PTC 0.75A" H 6000 1450 50  0000 C CNN
+F 2 "AMR_Central:Fuse_1812" H 6000 1200 50  0001 C CNN
+F 3 "" H 6000 1200 50  0001 C CNN
+	1    6000 1200
+	1    0    0    -1
+$EndComp
+Text Label 5800 1200 0    40   ~ 0
+VIN_RAW
+Text Label 6200 1200 2    40   ~ 0
+VIN_FUSED
+$Comp
+L AMR_Central:D D2
+U 1 1 362A7A23
+P 6800 1200
+F 0 "D2" H 6800 950 50  0000 C CNN
+F 1 "SS34" H 6800 1450 50  0000 C CNN
+F 2 "AMR_Central:D_SMA" H 6800 1200 50  0001 C CNN
+F 3 "" H 6800 1200 50  0001 C CNN
+	1    6800 1200
+	1    0    0    -1
+$EndComp
+Text Label 6600 1200 0    40   ~ 0
+VIN_FUSED
+Text Label 7000 1200 2    40   ~ 0
+VIN_PROTECTED
+$Comp
+L AMR_Central:R R1
+U 1 1 0396DD45
+P 8400 1200
+F 0 "R1" H 8400 950 50  0000 C CNN
+F 1 "1k" H 8400 1450 50  0000 C CNN
+F 2 "AMR_Central:R_0805" H 8400 1200 50  0001 C CNN
+F 3 "" H 8400 1200 50  0001 C CNN
+	1    8400 1200
+	1    0    0    -1
+$EndComp
+Text Label 8200 1200 0    40   ~ 0
++5V
+Text Label 8600 1200 2    40   ~ 0
+PWR_LED_A
+$Comp
+L AMR_Central:LED LED1
+U 1 1 C1F04408
+P 9000 1200
+F 0 "LED1" H 9000 950 50  0000 C CNN
+F 1 "GREEN" H 9000 1450 50  0000 C CNN
+F 2 "AMR_Central:LED_0805" H 9000 1200 50  0001 C CNN
+F 3 "" H 9000 1200 50  0001 C CNN
+	1    9000 1200
+	1    0    0    -1
+$EndComp
+Text Label 8800 1200 0    40   ~ 0
+PWR_LED_A
+Text Label 9200 1200 2    40   ~ 0
+GND
+$Comp
+L AMR_Central:DCDC_3 U3
+U 1 1 88684686
+P 7600 1200
+F 0 "U3" H 7600 950 50  0000 C CNN
+F 1 "R-78E5.0-1.0" H 7600 1450 50  0000 C CNN
+F 2 "AMR_Central:RECOM_R-78E5.0-1.0_SIP3" H 7600 1200 50  0001 C CNN
+F 3 "" H 7600 1200 50  0001 C CNN
+	1    7600 1200
+	1    0    0    -1
+$EndComp
+Text Label 7300 1100 0    40   ~ 0
+VIN_PROTECTED
+Text Label 7300 1300 0    40   ~ 0
+GND
+Text Label 7900 1100 2    40   ~ 0
++5V
+$Comp
+L AMR_Central:LDO_5 U4
+U 1 1 6E0EB498
+P 7600 1800
+F 0 "U4" H 7600 1550 50  0000 C CNN
+F 1 "AP2112K-3.3" H 7600 2050 50  0000 C CNN
+F 2 "AMR_Central:SOT-23-5" H 7600 1800 50  0001 C CNN
+F 3 "" H 7600 1800 50  0001 C CNN
+	1    7600 1800
+	1    0    0    -1
+$EndComp
+Text Label 7300 1700 0    40   ~ 0
++5V
+Text Label 7300 1800 0    40   ~ 0
++5V
+Text Label 7300 1900 0    40   ~ 0
+GND
+NoConn ~ 7900 1900
+Text Label 7900 1700 2    40   ~ 0
++3V3_PERIPH
+$Comp
+L AMR_Central:D D1
+U 1 1 5CDEFEA9
+P 6200 1700
+F 0 "D1" H 6200 1450 50  0000 C CNN
+F 1 "SMBJ18A" H 6200 1950 50  0000 C CNN
+F 2 "AMR_Central:D_SMB" H 6200 1700 50  0001 C CNN
+F 3 "" H 6200 1700 50  0001 C CNN
+	1    6200 1700
+	1    0    0    -1
+$EndComp
+Text Label 6000 1700 0    40   ~ 0
+VIN_FUSED
+Text Label 6400 1700 2    40   ~ 0
+GND
+$Comp
+L AMR_Central:C C1
+U 1 1 3125E622
+P 6800 1700
+F 0 "C1" H 6800 1450 50  0000 C CNN
+F 1 "10uF/35V" H 6800 1950 50  0000 C CNN
+F 2 "AMR_Central:C_0805" H 6800 1700 50  0001 C CNN
+F 3 "" H 6800 1700 50  0001 C CNN
+	1    6800 1700
+	1    0    0    -1
+$EndComp
+Text Label 6600 1700 0    40   ~ 0
+VIN_PROTECTED
+Text Label 7000 1700 2    40   ~ 0
+GND
+$Comp
+L AMR_Central:C C2
+U 1 1 E8C6A687
+P 8400 1700
+F 0 "C2" H 8400 1450 50  0000 C CNN
+F 1 "22uF/10V" H 8400 1950 50  0000 C CNN
+F 2 "AMR_Central:C_0805" H 8400 1700 50  0001 C CNN
+F 3 "" H 8400 1700 50  0001 C CNN
+	1    8400 1700
+	1    0    0    -1
+$EndComp
+Text Label 8200 1700 0    40   ~ 0
++5V
+Text Label 8600 1700 2    40   ~ 0
+GND
+$Comp
+L AMR_Central:C C3
+U 1 1 AAB661B4
+P 9000 1700
+F 0 "C3" H 9000 1450 50  0000 C CNN
+F 1 "1uF" H 9000 1950 50  0000 C CNN
+F 2 "AMR_Central:C_0805" H 9000 1700 50  0001 C CNN
+F 3 "" H 9000 1700 50  0001 C CNN
+	1    9000 1700
+	1    0    0    -1
+$EndComp
+Text Label 8800 1700 0    40   ~ 0
++5V
+Text Label 9200 1700 2    40   ~ 0
+GND
+$Comp
+L AMR_Central:C C4
+U 1 1 B30E78BB
+P 9600 1700
+F 0 "C4" H 9600 1450 50  0000 C CNN
+F 1 "1uF" H 9600 1950 50  0000 C CNN
+F 2 "AMR_Central:C_0805" H 9600 1700 50  0001 C CNN
+F 3 "" H 9600 1700 50  0001 C CNN
+	1    9600 1700
+	1    0    0    -1
+$EndComp
+Text Label 9400 1700 0    40   ~ 0
++3V3_PERIPH
+Text Label 9800 1700 2    40   ~ 0
+GND
+$Comp
+L AMR_Central:C C5
+U 1 1 D03C5EC3
+P 7200 3000
+F 0 "C5" H 7200 2750 50  0000 C CNN
+F 1 "10uF" H 7200 3250 50  0000 C CNN
+F 2 "AMR_Central:C_0805" H 7200 3000 50  0001 C CNN
+F 3 "" H 7200 3000 50  0001 C CNN
+	1    7200 3000
+	1    0    0    -1
+$EndComp
+Text Label 7000 3000 0    40   ~ 0
++3V3_PERIPH
+Text Label 7400 3000 2    40   ~ 0
+GND
+$Comp
+L AMR_Central:C C6
+U 1 1 2037B18A
+P 7800 3000
+F 0 "C6" H 7800 2750 50  0000 C CNN
+F 1 "100nF" H 7800 3250 50  0000 C CNN
+F 2 "AMR_Central:C_0805" H 7800 3000 50  0001 C CNN
+F 3 "" H 7800 3000 50  0001 C CNN
+	1    7800 3000
+	1    0    0    -1
+$EndComp
+Text Label 7600 3000 0    40   ~ 0
++3V3_PERIPH
+Text Label 8000 3000 2    40   ~ 0
+GND
+Text Notes 7300 4550 0    70   ~ 12
+FIELD SENSOR INTERFACES
+$Comp
+L AMR_Central:CONN_1X6 J2
+U 1 1 8AB2C972
+P 7600 5000
+F 0 "J2" H 7600 4750 50  0000 C CNN
+F 1 "RAIN RJ11" H 7600 5250 50  0000 C CNN
+F 2 "AMR_Central:WR-MJ_615006138421" H 7600 5000 50  0001 C CNN
+F 3 "" H 7600 5000 50  0001 C CNN
+	1    7600 5000
+	1    0    0    -1
+$EndComp
+NoConn ~ 7300 5375
+NoConn ~ 7300 5225
+Text Label 7300 5075 0    40   ~ 0
+GND
+Text Label 7300 4925 0    40   ~ 0
+RAIN_RAW
+NoConn ~ 7300 4775
+NoConn ~ 7300 4625
+$Comp
+L AMR_Central:CONN_1X6 J3
+U 1 1 2928496A
+P 7600 5900
+F 0 "J3" H 7600 5650 50  0000 C CNN
+F 1 "WIND+VANE RJ11" H 7600 6150 50  0000 C CNN
+F 2 "AMR_Central:WR-MJ_615006138421" H 7600 5900 50  0001 C CNN
+F 3 "" H 7600 5900 50  0001 C CNN
+	1    7600 5900
+	1    0    0    -1
+$EndComp
+NoConn ~ 7300 6275
+Text Label 7300 6125 0    40   ~ 0
+VANE_RAW
+Text Label 7300 5975 0    40   ~ 0
+GND
+Text Label 7300 5825 0    40   ~ 0
+WIND_RAW
+Text Label 7300 5675 0    40   ~ 0
+GND
+NoConn ~ 7300 5525
+$Comp
+L AMR_Central:CONN_1X3 J4
+U 1 1 888B5E8C
+P 7600 6050
+F 0 "J4" H 7600 5800 50  0000 C CNN
+F 1 "DHT11" H 7600 6300 50  0000 C CNN
+F 2 "AMR_Central:Connector_3" H 7600 6050 50  0001 C CNN
+F 3 "" H 7600 6050 50  0001 C CNN
+	1    7600 6050
+	1    0    0    -1
+$EndComp
+Text Label 7300 6200 0    40   ~ 0
++3V3_PERIPH
+Text Label 7300 6050 0    40   ~ 0
+DHT_RAW
+Text Label 7300 5900 0    40   ~ 0
+GND
+$Comp
+L AMR_Central:CONN_1X4 J5
+U 1 1 6921D7B9
+P 9600 5000
+F 0 "J5" H 9600 4750 50  0000 C CNN
+F 1 "BMP280 I2C" H 9600 5250 50  0000 C CNN
+F 2 "AMR_Central:Connector_4" H 9600 5000 50  0001 C CNN
+F 3 "" H 9600 5000 50  0001 C CNN
+	1    9600 5000
+	1    0    0    -1
+$EndComp
+Text Label 9300 5225 0    40   ~ 0
++3V3_PERIPH
+Text Label 9300 5075 0    40   ~ 0
+I2C_SDA_RAW
+Text Label 9300 4925 0    40   ~ 0
+I2C_SCL_RAW
+Text Label 9300 4775 0    40   ~ 0
+GND
+$Comp
+L AMR_Central:CONN_1X2 J6
+U 1 1 B9836F8E
+P 9600 5700
+F 0 "J6" H 9600 5450 50  0000 C CNN
+F 1 "PASSIVE LDR" H 9600 5950 50  0000 C CNN
+F 2 "AMR_Central:Connector_2" H 9600 5700 50  0001 C CNN
+F 3 "" H 9600 5700 50  0001 C CNN
+	1    9600 5700
+	1    0    0    -1
+$EndComp
+Text Label 9300 5775 0    40   ~ 0
+LDR_RAW
+Text Label 9300 5625 0    40   ~ 0
+GND
+$Comp
+L AMR_Central:CONN_1X2 J7
+U 1 1 BDB16B03
+P 9600 6400
+F 0 "J7" H 9600 6150 50  0000 C CNN
+F 1 "BAT SENSE 0-6V" H 9600 6650 50  0000 C CNN
+F 2 "AMR_Central:Connector_2" H 9600 6400 50  0001 C CNN
+F 3 "" H 9600 6400 50  0001 C CNN
+	1    9600 6400
+	1    0    0    -1
+$EndComp
+Text Label 9300 6475 0    40   ~ 0
+BATT_SENSE_RAW
+Text Label 9300 6325 0    40   ~ 0
+GND
+$Comp
+L AMR_Central:CONN_1X4 J8
+U 1 1 CB5626FD
+P 5200 5200
+F 0 "J8" H 5200 4950 50  0000 C CNN
+F 1 "SERVICE UART" H 5200 5450 50  0000 C CNN
+F 2 "AMR_Central:Connector_4" H 5200 5200 50  0001 C CNN
+F 3 "" H 5200 5200 50  0001 C CNN
+	1    5200 5200
+	1    0    0    -1
+$EndComp
+Text Label 4900 5425 0    40   ~ 0
++3V3_PERIPH
+Text Label 4900 5275 0    40   ~ 0
+GND
+Text Label 4900 5125 0    40   ~ 0
+UART_TX
+Text Label 4900 4975 0    40   ~ 0
+UART_RX
+$Comp
+L AMR_Central:CONN_1X2 J10
+U 1 1 83A43445
+P 5200 4700
+F 0 "J10" H 5200 4450 50  0000 C CNN
+F 1 "PANEL SETUP BUTTON" H 5200 4950 50  0000 C CNN
+F 2 "AMR_Central:JST_XH_B2B-XH-A_1x02_P2.50mm" H 5200 4700 50  0001 C CNN
+F 3 "" H 5200 4700 50  0001 C CNN
+	1    5200 4700
+	1    0    0    -1
+$EndComp
+Text Label 4900 4775 0    40   ~ 0
+SETUP_RESET
+Text Label 4900 4625 0    40   ~ 0
+GND
+$Comp
+L AMR_Central:D D3-D9
+U 1 1 F254EFFA
+P 5000 5800
+F 0 "D3-D9" H 5000 5550 50  0000 C CNN
+F 1 "PESD3V3" H 5000 6050 50  0000 C CNN
+F 2 "AMR_Central_D_SOD323" H 5000 5800 50  0001 C CNN
+F 3 "" H 5000 5800 50  0001 C CNN
+	1    5000 5800
+	1    0    0    -1
+$EndComp
+$Comp
+L AMR_Central:D D10
+U 1 1 12897298
+P 5000 6060
+F 0 "D10" H 5000 5810 50  0000 C CNN
+F 1 "BZT52C6V2" H 5000 6310 50  0000 C CNN
+F 2 "AMR_Central_D_SOD323" H 5000 6060 50  0001 C CNN
+F 3 "" H 5000 6060 50  0001 C CNN
+	1    5000 6060
+	1    0    0    -1
+$EndComp
+$Comp
+L AMR_Central:R R1,R2,R4,R12,R14
+U 1 1 6ADBD0F6
+P 5000 6320
+F 0 "R1,R2,R4,R12,R14" H 5000 6070 50  0000 C CNN
+F 1 "1k" H 5000 6570 50  0000 C CNN
+F 2 "AMR_Central_R_0805" H 5000 6320 50  0001 C CNN
+F 3 "" H 5000 6320 50  0001 C CNN
+	1    5000 6320
+	1    0    0    -1
+$EndComp
+$Comp
+L AMR_Central:R R3,R5,R13,R15
+U 1 1 ED90FBD5
+P 5000 6580
+F 0 "R3,R5,R13,R15" H 5000 6330 50  0000 C CNN
+F 1 "10k" H 5000 6830 50  0000 C CNN
+F 2 "AMR_Central_R_0805" H 5000 6580 50  0001 C CNN
+F 3 "" H 5000 6580 50  0001 C CNN
+	1    5000 6580
+	1    0    0    -1
+$EndComp
+$Comp
+L AMR_Central:R R6
+U 1 1 D2B20943
+P 5000 6840
+F 0 "R6" H 5000 6590 50  0000 C CNN
+F 1 "220R" H 5000 7090 50  0000 C CNN
+F 2 "AMR_Central_R_0805" H 5000 6840 50  0001 C CNN
+F 3 "" H 5000 6840 50  0001 C CNN
+	1    5000 6840
+	1    0    0    -1
+$EndComp
+$Comp
+L AMR_Central:R R7,R10,R11
+U 1 1 C320D36E
+P 5000 7100
+F 0 "R7,R10,R11" H 5000 6850 50  0000 C CNN
+F 1 "4.7k" H 5000 7350 50  0000 C CNN
+F 2 "AMR_Central_R_0805" H 5000 7100 50  0001 C CNN
+F 3 "" H 5000 7100 50  0001 C CNN
+	1    5000 7100
+	1    0    0    -1
+$EndComp
+$Comp
+L AMR_Central:R R8,R9
+U 1 1 70D6A51A
+P 5000 7360
+F 0 "R8,R9" H 5000 7110 50  0000 C CNN
+F 1 "100R" H 5000 7610 50  0000 C CNN
+F 2 "AMR_Central_R_0805" H 5000 7360 50  0001 C CNN
+F 3 "" H 5000 7360 50  0001 C CNN
+	1    5000 7360
+	1    0    0    -1
+$EndComp
+$Comp
+L AMR_Central:R R16,R17
+U 1 1 EBC79698
+P 5000 7620
+F 0 "R16,R17" H 5000 7370 50  0000 C CNN
+F 1 "100k 1%" H 5000 7870 50  0000 C CNN
+F 2 "AMR_Central_R_0805" H 5000 7620 50  0001 C CNN
+F 3 "" H 5000 7620 50  0001 C CNN
+	1    5000 7620
+	1    0    0    -1
+$EndComp
+$Comp
+L AMR_Central:C C3,C4
+U 1 1 67295166
+P 6000 5800
+F 0 "C3,C4" H 6000 5550 50  0000 C CNN
+F 1 "1uF" H 6000 6050 50  0000 C CNN
+F 2 "AMR_Central_C_0805" H 6000 5800 50  0001 C CNN
+F 3 "" H 6000 5800 50  0001 C CNN
+	1    6000 5800
+	1    0    0    -1
+$EndComp
+$Comp
+L AMR_Central:C C6,C11
+U 1 1 E3F6036F
+P 6000 6060
+F 0 "C6,C11" H 6000 5810 50  0000 C CNN
+F 1 "100nF" H 6000 6310 50  0000 C CNN
+F 2 "AMR_Central_C_0805" H 6000 6060 50  0001 C CNN
+F 3 "" H 6000 6060 50  0001 C CNN
+	1    6000 6060
+	1    0    0    -1
+$EndComp
+Text Notes 700 7200 0    55   ~ 0
+BAT SENSE is limited to 0-6.0V because firmware uses a 100k/100k divider and 2.0 multiplier.
+Text Notes 700 7350 0    55   ~ 0
+Use a tuned 868MHz antenna. Do not transmit without the antenna connected.
+Text Notes 700 7500 0    55   ~ 0
+The enclosure-mounted normally-open setup button connects to J10; no switch is fitted on the PCB.
+$EndSCHEMATC

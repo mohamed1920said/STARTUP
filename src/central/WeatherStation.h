@@ -6,7 +6,7 @@
 
 /* ---------- Rain ----------
  * Tipping bucket rain gauge. Each tip = RAIN_TIP_MM millimeters of rainfall.
- * Pulse counted on RISING edge via interrupt with software debounce.
+ * Pulse counted on FALLING edge via interrupt with software debounce.
  * Typical: 0.2794 mm/tip (= 0.011 inches/tip) */
 constexpr float RAIN_TIP_MM       = 0.2794f;  // mm per bucket tip
 
@@ -78,5 +78,5 @@ private:
     float readLuminosity();
     float calcWindDeg(int rawAdc);
     int median5();
-    static const WindCal _adcCal[8];
+    static const WindCal _adcCal[16];
 };

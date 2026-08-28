@@ -34,6 +34,8 @@
         <a href="#sensors" class="nav-item"><i data-lucide="cpu"></i><span>Sensors</span></a>
         <a href="#actuators" class="nav-item"><i data-lucide="droplets"></i><span>Actuators</span></a>
         <a href="#weather" class="nav-item"><i data-lucide="cloud-rain"></i><span>Weather</span></a>
+        <a href="#edge-ai" class="nav-item"><i data-lucide="brain-circuit"></i><span>Edge AI</span></a>
+        <a href="#data-collection" class="nav-item"><i data-lucide="brain-circuit"></i><span>AI Dataset</span></a>
 
         <div class="nav-section">MANAGEMENT</div>
         <a href="#registered-nodes" class="nav-item"><i data-lucide="server"></i><span>Device Fleet</span></a>
@@ -191,6 +193,26 @@
           </div>
         </section>
 
+        <section id="edge-ai" class="edge-ai-section">
+          <div class="section-title ai-section-title">
+            <h3><i data-lucide="brain-circuit"></i> Edge AI Irrigation Advisor</h3>
+            <span id="ai-mode" class="ai-mode shadow">SHADOW MODE</span>
+          </div>
+          <p class="ai-explainer">Local ESP32-S3 decisions. Safety rules remain independent from model predictions.</p>
+          <div class="ai-forecast-grid">
+            <div class="ai-forecast-card"><label>Tomorrow temperature</label><strong><span id="ai-f-temp">--</span> °C</strong></div>
+            <div class="ai-forecast-card"><label>Rain probability</label><strong><span id="ai-f-rain-p">--</span>%</strong></div>
+            <div class="ai-forecast-card"><label>Predicted rain</label><strong><span id="ai-f-rain">--</span> mm</strong></div>
+            <div class="ai-forecast-card"><label>Predicted ET₀</label><strong><span id="ai-f-et0">--</span> mm</strong></div>
+          </div>
+          <div id="ai-zone-cards" class="ai-zone-grid">
+            <div id="ai-placeholder" class="empty-state">
+              <i data-lucide="scan-search" class="pulse-icon"></i>
+              <p>Waiting for a sensor reading to calculate the first recommendation...</p>
+            </div>
+          </div>
+        </section>
+
         <div class="node-sections-wrapper">
           <section id="sensors">
             <div class="section-title">
@@ -252,6 +274,51 @@
               </div>
             </section>
 
+            <section id="data-collection" class="panel">
+              <div class="panel-header">
+                <h3><i data-lucide="brain-circuit"></i> AI Dataset Collection</h3>
+              </div>
+              <div class="panel-body">
+                <div id="dataset-status" class="status-msg">Loading dataset status...</div>
+                <div class="form-actions full-width">
+                  <button type="button" id="dataset-download" class="btn-secondary">Download CSV</button>
+                  <button type="button" id="dataset-download-archive" class="btn-secondary">Download Previous CSV</button>
+                  <button type="button" id="dataset-clear" class="btn-danger">Clear Dataset</button>
+                </div>
+
+                <form id="field-config-form" class="modern-form">
+                  <div class="form-group"><label>Sensor Node ID</label><input id="fc-node" value="0001" maxlength="4" required></div>
+                  <div class="form-group"><label>Crop</label><input id="fc-crop" value="unknown" maxlength="23" required></div>
+                  <div class="form-group"><label>Growth Stage</label><input id="fc-stage" value="unknown" maxlength="23" required></div>
+                  <div class="form-group"><label>Soil Type</label><input id="fc-soil" value="unknown" maxlength="23" required></div>
+                  <div class="form-group"><label>Dry ADC Calibration</label><input type="number" id="fc-dry" min="0" max="4095" value="2500" required></div>
+                  <div class="form-group"><label>Wet ADC Calibration</label><input type="number" id="fc-wet" min="0" max="4095" value="400" required></div>
+                  <div class="form-group"><label>Zone Area (m²)</label><input type="number" id="fc-area" min="0" step="0.1" value="0"></div>
+                  <div class="form-group"><label>Emitter Flow (L/h)</label><input type="number" id="fc-emitter" min="0" step="0.1" value="0"></div>
+                  <div class="form-actions full-width"><button type="submit" class="btn-primary">Save Field Profile</button><div id="field-config-status" class="status-msg"></div></div>
+                </form>
+
+                <form id="dataset-label-form" class="modern-form">
+                  <div class="form-group">
+                    <label>Event Label</label>
+                    <select id="dataset-label" required>
+                      <option value="normal">Normal observation</option>
+                      <option value="irrigation_start">Irrigation start</option>
+                      <option value="irrigation_end">Irrigation end</option>
+                      <option value="rain">Rain event</option>
+                      <option value="leak">Leak</option>
+                      <option value="blocked_pipe">Blocked pipe</option>
+                      <option value="empty_tank">Empty tank</option>
+                      <option value="sensor_fault">Sensor fault</option>
+                      <option value="valve_fault">Valve fault</option>
+                    </select>
+                  </div>
+                  <div class="form-group"><label>Notes</label><input id="dataset-notes" maxlength="79" placeholder="What happened in the field?"></div>
+                  <div class="form-actions full-width"><button type="submit" class="btn-secondary">Add Event Marker</button><div id="dataset-label-status" class="status-msg"></div></div>
+                </form>
+              </div>
+            </section>
+
             <section id="cloud-config" class="panel">
               <div class="panel-header">
                 <h3><i data-lucide="cloud"></i> Cloud Synchronization</h3>
@@ -260,11 +327,15 @@
                 <form id="cloud-form" class="modern-form">
                   <div class="form-group full-width">
                     <label>Endpoint URL</label>
-                    <input type="url" id="c-url" placeholder="http://192.168.1.100:8082" required>
+                    <input type="url" id="c-url" placeholder="https://cloud.example.com" required>
                   </div>
                   <div class="form-group full-width">
                     <label>API Key</label>
-                    <input type="password" id="c-apikey" placeholder="Enter API Key" required>
+                    <input type="password" id="c-apikey" placeholder="Enter API Key">
+                  </div>
+                  <div class="form-group full-width">
+                    <label>Trusted root CA certificate (PEM)</label>
+                    <textarea id="c-cacert" rows="7" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
                   </div>
                   <div class="form-actions full-width">
                     <button type="submit" class="btn-secondary">Save Configuration</button>
@@ -343,7 +414,7 @@
 
   <script>
     // Initialize Icons
-    lucide.createIcons();
+    if (window.lucide) lucide.createIcons();
 
     // Theme Management
     const themeBtn = document.getElementById('theme-btn');

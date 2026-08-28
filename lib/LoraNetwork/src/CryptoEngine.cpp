@@ -15,9 +15,10 @@ bool CryptoEngine::begin(const uint8_t* psk, size_t len) {
     return true;
 }
 
-void CryptoEngine::buildNonce(NodeId node_id, uint32_t sequence,
+void CryptoEngine::buildNonce(NodeId node_id, uint8_t pkt_type, uint32_t sequence,
                                uint8_t* nonce, size_t nonce_len) {
     std::memset(nonce, 0, nonce_len);
+    nonce[0] = pkt_type;
     nonce[2] = static_cast<uint8_t>(node_id >> 8);
     nonce[3] = static_cast<uint8_t>(node_id & 0xFF);
     for (int i = 0; i < 8; ++i) {
@@ -47,7 +48,7 @@ bool CryptoEngine::encrypt(uint8_t* plaintext, size_t plaintext_len,
                                   _key, AES128_KEY_SIZE * 8);
     if (ret != 0) { mbedtls_gcm_free(&gcm); return false; }
     uint8_t nonce[GCM_IV_SIZE];
-    buildNonce(node_id, sequence, nonce, GCM_IV_SIZE);
+    buildNonce(node_id, pkt_type, sequence, nonce, GCM_IV_SIZE);
     std::memcpy(frame.iv, nonce, GCM_IV_SIZE);
     uint8_t aad[7];
     buildAAD(node_id, pkt_type, sequence, aad);

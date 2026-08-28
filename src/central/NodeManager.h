@@ -17,6 +17,9 @@ struct NodeInfo {
     uint8_t  threshold;
     uint16_t sensorId;
     bool     valveOpen;
+    uint32_t lastTelemetrySeq;
+    uint32_t lastAckSeq;
+    uint32_t lastHeartbeatSeq;
 };
 
 class NodeManager {
@@ -27,7 +30,7 @@ public:
     bool remove(uint16_t id);
     bool setActuatorConfig(uint16_t id, bool autoMode, uint8_t threshold, uint16_t sensorId);
     void setValveState(uint16_t id, bool open);
-    void handlePacket(uint16_t nodeId, PacketType type,
+    bool handlePacket(uint16_t nodeId, PacketType type,
                       const uint8_t* plaintext, size_t len, uint32_t seq);
     int count() const { return _count; }
     const NodeInfo* getNode(int i) const { return (i < _count) ? &_nodes[i] : nullptr; }

@@ -13,7 +13,7 @@ public:
                  NodeId node_id, const LoraFrame& frame);
     static bool deriveSessionKey(const uint8_t* psk, NodeId node_id,
                                  uint8_t* session_key_out);
-    static void buildNonce(NodeId node_id, uint32_t sequence,
+    static void buildNonce(NodeId node_id, uint8_t pkt_type, uint32_t sequence,
                            uint8_t* nonce, size_t nonce_len);
     static void buildAAD(NodeId node_id, uint8_t pkt_type,
                          uint32_t sequence, uint8_t* aad);

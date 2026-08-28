@@ -1,0 +1,28 @@
+﻿Item,Description,Qty,Material,Process,Critical note
+P01,Lower base plate,1,6061-T6,Laser/CNC + anodize,240 x 180 x 6 mm
+P02,Upper support plate,1,6061-T6,Laser/CNC + anodize,210 x 160 x 6 mm
+P03,Adjustable motor bracket,1,6061-T6,Laser/CNC + anodize,+/-5 mm mesh adjustment
+P04,40T motor gear,1,PA12-CF,FDM + metal D insert,"m1.5, PA20, 17 mm face"
+P05,80T clutch gear,1,PA12-CF,FDM + face finish,"m1.5, PA20, 20 mm face"
+P06,20 mm output shaft/flange,1,4140 or 316 SS,Turn/mill/grind,20 h6 journals; 4 x M6 flange
+P07,Output gear clutch hub,1,C45 steel,Turn/keyway/zinc,"OD50, bore20.1"
+P08,Clutch pressure plate,1,C45 steel,Turn/grind/zinc,"OD62, bore17.2, t5"
+P09,Belleville stack,1,Spring steel,Purchased/calibrated,Initial preload about 530 N
+P10,Replaceable stem adapter,1,17-4PH or PA12-CF,Machine/print,44 x 18; stem HOLD
+P11,50 mm valve bridge clamp,1,6061-T6,CNC + anodize,72 mm HOLD opening
+P12,63 mm alternative clamp,1,6061-T6,CNC + anodize,88 mm HOLD opening; alternative
+P13,AS5600 bracket,1,6061 or PA12-CF,Machine/print,"Nonmagnetic, adjustable"
+P14,Magnet carrier,1,PA12-CF,FDM,Final shaft mounting
+P15,Reed cam ring,1,PA12-CF,FDM,Two adjustable magnets
+P16,OPEN reed bracket,1,316 SS,Laser,Slotted
+P17,CLOSED reed bracket,1,316 SS,Laser,Slotted
+P18,OPEN microswitch bracket,1,316 SS,Laser,+/-5 deg adjustment
+P19,CLOSED microswitch bracket,1,316 SS,Laser,+/-5 deg adjustment
+P20,Mechanical stop bracket,1,6061 or steel,Machine,Two M8 stops
+P21,3S1P battery tray,1,ASA/PA12-CF,FDM,3 x protected 18650 envelope
+P22,TTGO tray,1,ASA/PA12-CF,FDM,USB service access
+P23,BTS7960 tray,1,ASA/PA12-CF,FDM,25 mm heatsink clearance
+P24,Manual override hex,1,316 SS,Turn/mill/passivate,"30 AF, bore20.2, cross-pin"
+P25,Gasketed enclosure cover,1,UV PC/ASA,FDM/mould,IP65/IP67 design intent
+P26,Lower bearing carrier,1,6061-T6,Turn/mill/anodize,47 H7 x 16; retainers
+P27,Upper bearing carrier,1,6061-T6,Turn/mill/anodize,47 H7 x 16; retainers

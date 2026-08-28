@@ -1,0 +1,28 @@
+{
+  "release": "A-PROTOTYPE",
+  "production_released": false,
+  "solidworks_version": "2026 SP3.2 (34.3.2)",
+  "native_parts_validated": 33,
+  "resolved_assembly_components": 35,
+  "motion_study": {
+    "name": "AMR_Valve_Open_Close",
+    "type": "Basic Motion",
+    "duration_seconds": 6,
+    "motor_features": 10,
+    "reopen_validation": "PASS"
+  },
+  "pdf_pages": 20,
+  "counts": {
+    "native": 68,
+    "step": 34,
+    "stl": 10,
+    "dxf": 9,
+    "motion_previews": 2
+  },
+  "critical_holds": [
+    "Measure real 5840-31ZY motor body, mounting, shaft, and stall current.",
+    "Measure real valve neck/stem and breakaway torque in all required conditions.",
+    "Implement continuous BTS7960 actuator firmware; current TB6612 pulse firmware is incompatible.",
+    "Complete ingress, safety, EMC, environmental, and endurance testing before sale."
+  ]
+}

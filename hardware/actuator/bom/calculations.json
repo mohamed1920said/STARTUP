@@ -1,0 +1,22 @@
+{
+  "ValveDiameter_mm": 50,
+  "MotorGearTeeth": 40,
+  "OutputGearTeeth": 80,
+  "GearModule_mm": 1.5,
+  "PressureAngle_deg": 20,
+  "GearCenterDistance_mm": 90,
+  "MeshBacklash_mm": 0.3,
+  "GearRatio": 2.0,
+  "OutputShaftDiameter_mm": 20,
+  "BearingOD_mm": 47,
+  "BearingWidth_mm": 14,
+  "PlateThickness_mm": 6,
+  "ValveRotation_deg": 90,
+  "NominalMotorRPM": 40,
+  "NominalOutputRPM": 20,
+  "Theoretical90DegreeTime_s": 0.75,
+  "InitialClutchTorque_Nm": 8,
+  "AssumedFrictionCoefficient": 0.3,
+  "AssumedMeanFrictionRadius_mm": 25,
+  "CalculatedInitialAxialPreload_N": 533
+}

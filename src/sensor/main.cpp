@@ -3,6 +3,7 @@
 #include <RadioLib.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <Preferences.h>
 #include <LoraProtocol.h>
 
 const uint16_t NODE_ID      = 0x0001;
@@ -10,8 +11,7 @@ const uint8_t  NODE_PSK[16] = {0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,
                                0x88,0x99,0xAA,0xBB,0xCC,0xDD,0xEE,0xFF};
 
 const float    LORA_FREQ = 868.0f;
-const uint8_t  PIN_RST = 14;
-Module loraMod(LORA_CS, LORA_IRQ, PIN_RST, RADIOLIB_NC);
+Module loraMod(LORA_CS, LORA_IRQ, LORA_RST, RADIOLIB_NC);
 SX1276 radio(&loraMod);
 
 const uint8_t MOISTURE_PIN = 34;
@@ -22,10 +22,25 @@ DallasTemperature ds18b20(&oneWire);
 const uint8_t BATT_PIN = 35;
 const int MOISTURE_DRY = 2500;
 const int MOISTURE_WET = 400;
-const uint32_t TX_INTERVAL_MS = 5000;
+const uint32_t TX_INTERVAL_MS = 120000;
 uint32_t lastTxMs = 0;
 uint32_t seqCounter = 0;
+uint32_t seqLimit = 0;
 bool tempRequested = false;
+
+uint32_t nextPersistentSequence() {
+    if (seqCounter >= seqLimit) {
+        Preferences prefs;
+        if (!prefs.begin("lora_seq", false)) return 0;
+        uint32_t start = prefs.getULong("next", 1);
+        if (start == 0 || start > UINT32_MAX - 1024) { prefs.end(); return 0; }
+        seqCounter = start - 1;
+        seqLimit = start + 1023;
+        prefs.putULong("next", seqLimit + 1);
+        prefs.end();
+    }
+    return ++seqCounter;
+}
 
 float readBattery() {
     uint32_t sum = 0;
@@ -34,7 +49,8 @@ float readBattery() {
 }
 
 bool sendTelemetry() {
-    seqCounter++;
+    uint32_t sequence = nextPersistentSequence();
+    if (sequence == 0) { Serial.println(F("[SN] Sequence space exhausted")); return false; }
     float battV = readBattery();
     int moistADC = 0;
     for (int i = 0; i < 16; i++) { moistADC += analogRead(MOISTURE_PIN); delayMicroseconds(100); }
@@ -48,10 +64,10 @@ bool sendTelemetry() {
     if (!tempOk) { tempC = 0; err |= 0x02; }
 
     Serial.printf("[SN] Seq=%u Moist=%u Temp=%.2f Batt=%.2fV\n",
-                  seqCounter, moistADC, tempC, battV);
+                  sequence, moistADC, tempC, battV);
 
     SensorTelemetry payload;
-    payload.sequence      = seqCounter;
+    payload.sequence      = sequence;
     payload.moisture_raw  = moistADC;
     int pct = map(moistADC, MOISTURE_DRY, MOISTURE_WET, 0, 100);
     payload.moisture_pct = (uint8_t)constrain(pct, 0, 100);
@@ -68,7 +84,7 @@ bool sendTelemetry() {
     uint8_t iv[GCM_IV_SIZE], mic[MIC_SIZE];
     CryptoResult cr = crypto.encrypt(pt, TELEMETRY_WIRE_SIZE,
                                       (uint8_t)PacketType::SENSOR_TELEMETRY,
-                                      seqCounter, NODE_ID, iv, mic);
+                                      sequence, NODE_ID, iv, mic);
     if (cr != CryptoResult::OK) {
         Serial.printf("[SN] Encrypt failed err=%d\n", (int)cr);
         return false;
@@ -94,7 +110,7 @@ void setup() {
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
     int st = radio.begin(LORA_FREQ, 125.0f, 9, 5,
-                          RADIOLIB_SX127X_SYNC_WORD, 10, 8);
+                          RADIOLIB_SX127X_SYNC_WORD, 10, 12);
     if (st != RADIOLIB_ERR_NONE) {
         Serial.printf("[SN] LoRa error: %d\n", st);
     } else {
