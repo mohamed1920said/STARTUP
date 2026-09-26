@@ -1,4 +1,5 @@
 #include "DataLogger.h"
+#include "DatasetScan.h"
 
 #include <LittleFS.h>
 #include <cmath>
@@ -8,7 +9,7 @@ namespace {
 // Two 1.25 MiB segments leave room for dashboard assets and LittleFS overhead
 // in the custom 3.375 MiB gateway filesystem partition.
 constexpr size_t MAX_DATASET_BYTES = 1280U * 1024U;
-constexpr const char* CSV_HEADER =
+constexpr char CSV_HEADER[] =
     "schema_version,record_type,epoch_ms,uptime_ms,boot_id,node_id,linked_node_id,sequence,"
     "moisture_raw,moisture_pct,soil_temp_c,air_temp_c,humidity_pct,pressure_hpa,"
     "rain_mm,wind_ms,wind_dir_deg,luminosity_lux,gateway_battery_mv,node_battery_v,"
@@ -22,18 +23,29 @@ constexpr const char* CSV_HEADER =
 }
 
 bool DataLogger::begin() {
+    if (_task) return true;
     if (!LittleFS.begin(false)) return false;
+    auto releaseInitialization = [this]() {
+        if (_queue) { vQueueDelete(_queue); _queue = nullptr; }
+        if (_fileMutex) { vSemaphoreDelete(_fileMutex); _fileMutex = nullptr; }
+        _task = nullptr;
+        return false;
+    };
     _fileMutex = xSemaphoreCreateMutex();
     _queue = xQueueCreate(48, sizeof(DatasetRecord));
-    if (!_fileMutex || !_queue || !ensureHeader()) return false;
+    if (!_fileMutex || !_queue || !ensureHeader()) return releaseInitialization();
     File existing = LittleFS.open(DATASET_PATH, FILE_READ);
-    if (existing) {
-        uint32_t lines = 0;
-        while (existing.available()) if (existing.read() == '\n') ++lines;
-        existing.close();
-        _recordCount = lines > 0 ? lines - 1 : 0;
+    if (!existing) return releaseInitialization();
+    const auto scan = DatasetScan::countRecords(existing.size(),
+        [&existing](uint8_t* buffer, size_t length) { return existing.read(buffer, length); },
+        []() { vTaskDelay(1); });
+    existing.close();
+    if (!scan.complete) return releaseInitialization();
+    _recordCount = scan.records;
+    if (xTaskCreatePinnedToCore(taskEntry, "data_logger", 6144, this, 1, &_task, 0) != pdPASS) {
+        return releaseInitialization();
     }
-    return xTaskCreatePinnedToCore(taskEntry, "data_logger", 6144, this, 1, &_task, 0) == pdPASS;
+    return true;
 }
 
 DatasetRecord DataLogger::makeRecord(const char* type, uint64_t epochMs,
@@ -108,8 +120,13 @@ void DataLogger::taskLoop() {
 bool DataLogger::ensureHeader() {
     if (LittleFS.exists(DATASET_PATH)) {
         File existing = LittleFS.open(DATASET_PATH, FILE_READ);
-        String header = existing ? existing.readStringUntil('\n') : String();
-        if (existing) existing.close();
+        if (!existing) return false;
+        // A corrupt file without a newline must not allocate the whole dataset.
+        char headerBuffer[sizeof(CSV_HEADER)]{};
+        const size_t length = existing.readBytesUntil('\n', headerBuffer, sizeof(headerBuffer) - 1);
+        headerBuffer[length] = '\0';
+        existing.close();
+        String header(headerBuffer);
         String expected(CSV_HEADER);
         expected.trim();
         header.trim();
@@ -170,12 +187,13 @@ bool DataLogger::append(const DatasetRecord& r) {
         r.aiFault, r.aiFaultConfidence);
     file.flush();
     file.close();
-    xSemaphoreGive(_fileMutex);
     if (written <= 0) {
         ++_droppedCount;
+        xSemaphoreGive(_fileMutex);
         return false;
     }
     ++_recordCount;
+    xSemaphoreGive(_fileMutex);
     return true;
 }
 
@@ -194,7 +212,15 @@ bool DataLogger::clear() {
 }
 
 std::string DataLogger::statusJson() const {
-    char buf[240];
+    char buf[304];
+    if (!_fileMutex || xSemaphoreTake(_fileMutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+        snprintf(buf, sizeof(buf),
+                 R"({"ready":%s,"busy":true,"records":%lu,"dropped":%lu,"bytes":null,"archive_bytes":null,"segment_limit":%u,"path":"%s"})",
+                 _task ? "true" : "false", static_cast<unsigned long>(_recordCount.load()),
+                 static_cast<unsigned long>(_droppedCount.load()),
+                 static_cast<unsigned>(MAX_DATASET_BYTES), DATASET_PATH);
+        return std::string(buf);
+    }
     size_t bytes = 0;
     size_t archiveBytes = 0;
     File file = LittleFS.open(DATASET_PATH, FILE_READ);
@@ -207,10 +233,17 @@ std::string DataLogger::statusJson() const {
         archiveBytes = file.size();
         file.close();
     }
+    const uint32_t records = _recordCount.load();
+    const uint32_t dropped = _droppedCount.load();
+    xSemaphoreGive(_fileMutex);
     snprintf(buf, sizeof(buf),
-             R"({"records":%lu,"dropped":%lu,"bytes":%u,"archive_bytes":%u,"segment_limit":%u,"path":"%s"})",
-             static_cast<unsigned long>(_recordCount), static_cast<unsigned long>(_droppedCount),
+             R"({"ready":%s,"busy":false,"records":%lu,"dropped":%lu,"bytes":%u,"archive_bytes":%u,"segment_limit":%u,"path":"%s"})",
+             _task ? "true" : "false", static_cast<unsigned long>(records), static_cast<unsigned long>(dropped),
              static_cast<unsigned>(bytes), static_cast<unsigned>(archiveBytes),
              static_cast<unsigned>(MAX_DATASET_BYTES), DATASET_PATH);
     return std::string(buf);
+}
+
+uint32_t DataLogger::stackHighWaterMark() const {
+    return _task ? uxTaskGetStackHighWaterMark(_task) : 0;
 }

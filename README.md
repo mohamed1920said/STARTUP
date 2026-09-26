@@ -1,40 +1,44 @@
 # AMR LoRa Irrigation System
 
-Production-focused firmware for three device roles:
+Supervised-pilot firmware for three device roles:
 
 - ESP32-S3 central gateway
 - TTGO LoRa32 soil sensor node
 - TTGO LoRa32 actuator/valve node
 
-The gateway receives AES-128-GCM encrypted LoRa telemetry at 868 MHz, serves a local dashboard, runs automatic irrigation rules and an offline ESP32-S3 Edge-AI advisor, controls actuators, records a versioned AI-ready dataset, publishes local MQTT data, and optionally connects to an HTTPS cloud API.
+The gateway receives AES-128-GCM encrypted LoRa telemetry at 868 MHz, serves a local dashboard, runs guarded irrigation rules and an offline ESP32-S3 Edge-AI advisor, controls actuators, records a versioned AI-ready dataset, and optionally connects to an HTTPS cloud API. Cloud control is CLOSE-only, while local MQTT and browser firmware upload are disabled by default for the supervised pilot.
 
 ## Firmware environments
 
 | Environment | Hardware | Purpose |
 |---|---|---|
-| `central_gateway` | ESP32-S3-DevKitC-1-N8 | Gateway, dashboard, weather, MQTT and cloud bridge |
+| `central_gateway` | ESP32-S3-DevKitC-1-N8 | Gateway, dashboard, weather and optional cloud bridge |
 | `sensor_node` | TTGO LoRa32 v2.1 | Soil moisture, DS18B20 temperature and battery telemetry |
 | `actuator_node` | TTGO LoRa32 v2.1 | Fail-safe latching-valve control, verified feedback and hydraulic telemetry |
 
 ## Wi-Fi setup
 
 1. Power the central gateway.
-2. Connect to the open `STARTUP-Gateway-xxxxxx` Wi-Fi network; no AP password is required.
-3. Open `http://192.168.4.1`.
-4. Use the branded setup page to select farm Wi-Fi and create an 8-32 character dashboard administrator password.
-5. After connection, sign in to the dashboard with username `admin` and the password created during setup.
+2. Read the generated commissioning password from the physical 115200-baud serial console.
+3. Connect to the WPA2-protected `STARTUP-Gateway-xxxxxx` Wi-Fi network using that password.
+4. Open `http://192.168.4.1`.
+5. Select farm Wi-Fi and create an 8–32 character dashboard administrator password.
+6. After restart, sign in to the dashboard with username `admin` and the configured password.
 
-The dashboard, REST API, WebSocket and OTA routes remain authenticated even though the commissioning AP is open.
+Use an isolated pilot network. The dashboard, REST API and WebSocket use HTTP Basic authentication. Gateway firmware updates use physical USB in this build.
 
 LoRa reception, local automation, actuator safety and CSV logging continue when
-farm Wi-Fi or internet access is unavailable. Dashboard, MQTT and cloud access
+farm Wi-Fi or internet access is unavailable. Dashboard and cloud access
 resume after the gateway can boot on the configured farm network.
 
 ## Build
 
 ```powershell
 pio run -e central_gateway -e sensor_node -e actuator_node
+pio run -e central_gateway -t buildfs
 ```
+
+`platformio.ini` pins Espressif32 platform `7.0.1` and exact tested library versions. Do not loosen those constraints for a pilot image; rebuild and repeat the deployment checklist after any dependency change.
 
 ## Upload the ESP32-S3 gateway
 
@@ -51,7 +55,13 @@ dashboard or partition layout inconsistent.
 
 ## Important protocol rule
 
-Gateway, sensor and actuator firmware must be upgraded together. ACK is 10 bytes and actuator heartbeat is 17 bytes in schema v2; mixed firmware releases cannot communicate correctly. The devices also share the same nonce layout, persistent sequence rules and replay-protection model.
+Gateway, sensor and actuator firmware must be upgraded together. This revision sends the full 16-byte AES-GCM authentication tag; firmware using the former 4-byte tag cannot communicate with it. ACK is 10 bytes and actuator heartbeat is 17 bytes. Persistent sequence reservations and replay checkpoints are written and read back before use; storage failure suppresses transmission or rejects the command/packet instead of continuing without replay protection.
+
+## Node commissioning
+
+Sensor and actuator images contain no default node ID or PSK. Provision each node over its physical USB serial connection, then add the exact same ID, type and unique 16-byte PSK in the gateway dashboard. Duplicate gateway IDs are refused. Reprovisioning requires explicit removal and a newly generated PSK. An unprovisioned or corrupt node keeps its radio disabled, and gateway OPEN remains blocked until it receives a fresh authenticated packet after provisioning. Never clear or clone the preserved `lora_seq` state while reusing a PSK; generate a new PSK after a full NVS erase.
+
+See the [supervised pilot deployment guide](docs/PILOT_DEPLOYMENT.md) for provisioning commands, cloud endpoints and the required bench and field validation.
 
 ## Prototype data collection
 
@@ -99,6 +109,8 @@ flash_central.bat     Windows gateway upload helper
 upload_guide.txt      Upload commands and recovery notes
 ```
 
-## Production note
+## Pilot safety limits
 
-This is suitable for controlled prototype and pilot testing. It contains a trained prototype model, but simulated device/control labels do not authorize unattended irrigation. Collect representative labeled field data, retrain, validate and complete shadow-mode acceptance before permitting AI control. Commercial release still requires per-device secret provisioning, signed firmware/secure boot, watchdog and brownout validation, enclosure and power testing, fail-safe hydraulic hardware, radio/regulatory certification, and documented installation/support procedures.
+Automatic mode can be enabled only after valid valve feedback received within 90 seconds. Invalid sensor data cancels an automatic OPEN that may still be in flight; invalid or stale data retries CLOSE until fresh feedback verifies commanded and physical state are closed. A failed safety enqueue remains eligible at the next pass without starting its throttle; a normal threshold-driven automatic CLOSE retries after five seconds. Pending tracking rejects duplicate live OPENs and never replaces one to make room. The actuator rejects OPEN below 3400 mV or above an implausible 5000 mV reading; CLOSE remains allowed. OPEN is capped at 300 seconds, the build rejects any higher configured cap, and repeated OPEN commands do not extend the active deadline. Failed OPEN feedback verification immediately sends CLOSE and retries it if necessary.
+
+This does not authorize unattended irrigation. A latching valve needs energy to close, software cannot prove water stopped without independent feedback, and the cloud queue is RAM-only with no automatic CSV backlog replay. Keep a physical master shutoff accessible and complete `docs/PILOT_DEPLOYMENT.md` before any wet pilot.

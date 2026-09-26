@@ -181,11 +181,22 @@ void CloudClient::pollCommands() {
         if (!error && doc.is<JsonArray>()) {
             JsonArray arr = doc.as<JsonArray>();
             for (JsonObject cmd : arr) {
-                uint32_t cmdId = cmd["command_id"];
-                uint16_t nodeId = cmd["node_id"];
+                const JsonVariantConst cmdIdValue = cmd["command_id"];
+                const JsonVariantConst nodeIdValue = cmd["node_id"];
                 const char* action = cmd["action"];
-                if (_cmdCallback && action) {
-                    bool on = (strcmp(action, "VALVE_ON") == 0);
+                const bool validAction = action &&
+                    (strcmp(action, "VALVE_ON") == 0 || strcmp(action, "VALVE_OFF") == 0);
+                if (!cmdIdValue.is<uint64_t>() || !nodeIdValue.is<uint64_t>() || !validAction)
+                    continue;
+                const uint64_t rawCmdId = cmdIdValue.as<uint64_t>();
+                const uint64_t rawNodeId = nodeIdValue.as<uint64_t>();
+                if (rawCmdId == 0 || rawCmdId > UINT32_MAX ||
+                    rawNodeId == 0 || rawNodeId >= UINT16_MAX)
+                    continue;
+                const uint32_t cmdId = static_cast<uint32_t>(rawCmdId);
+                const uint16_t nodeId = static_cast<uint16_t>(rawNodeId);
+                if (_cmdCallback) {
+                    const bool on = strcmp(action, "VALVE_ON") == 0;
                     _cmdCallback(cmdId, nodeId, on);
                 }
             }

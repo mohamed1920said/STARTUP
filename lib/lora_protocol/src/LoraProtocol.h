@@ -77,7 +77,7 @@ public:
      * @param sequence    64-bit sequence number (for nonce)
      * @param nodeId      16-bit node identifier
      * @param outIv       output 12-byte IV/nonce
-     * @param outMic      output 4-byte truncated MIC
+     * @param outMic      output full AES-GCM authentication tag
      */
     CryptoResult encrypt(uint8_t* pt, size_t ptLen,
                          uint8_t pktType, uint64_t sequence, uint16_t nodeId,
@@ -107,7 +107,7 @@ public:
      * @param sequence    64-bit sequence number (for nonce)
      * @param nodeId      16-bit node identifier
      * @param iv          12-byte IV from received frame
-     * @param mic         4-byte MIC from received frame
+     * @param mic         full AES-GCM authentication tag from received frame
      */
     CryptoResult decrypt(uint8_t* ct, size_t ctLen,
                          uint8_t pktType, uint64_t sequence, uint16_t nodeId,

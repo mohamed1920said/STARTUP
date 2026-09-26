@@ -109,6 +109,10 @@ Valve-open feedback (required for verified control and AI labels):
   Contact CLOSED to GND means valve OPEN.
   Contact OPEN means valve CLOSED.
 
+  The default actuator build disables this input and is manual-only. After wiring
+  and dry-bench verification, add `-DACTUATOR_VALVE_FB_PIN=3` to the actuator build
+  flags to enable measured feedback.
+
 Battery (single Li-ion 18650):
   BAT+ ── GPIO 35 (same divider as sensor: 100k+100k)
   BAT- ── GND
@@ -161,6 +165,11 @@ Division ratio: V_GPIO35 = V_bat * R2 / (R1 + R2) = V_bat / 2
 
 ADC formula in code:
   V_bat = (analogRead(35) / 4095.0) * 3.3 * 2.0
+
+Pilot actuator OPEN gate:
+  OPEN is rejected below 3.4 V or above an implausible 5.0 V reading.
+  CLOSE remains allowed. Validate the divider against a calibrated meter before
+  relying on this gate; a wrong divider ratio can produce a misleading reading.
 
 For TTGO boards, the divider is pre-soldered (R1=100k, R2=100k).
 For bare ESP32-S3, add external 100k+100k divider.

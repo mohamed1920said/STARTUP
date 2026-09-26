@@ -6,6 +6,12 @@
 #include <WiFi.h>
 #include <Update.h>
 #include <cctype>
+#include <cstring>
+#include <new>
+
+#ifndef PILOT_ENABLE_WEB_OTA
+#define PILOT_ENABLE_WEB_OTA 0
+#endif
 
 namespace {
 struct RequestBody {
@@ -15,26 +21,44 @@ struct RequestBody {
 
 void collectJsonBody(AsyncWebServerRequest* request, uint8_t* data, size_t len,
                      size_t index, size_t total) {
-    if (index == 0) request->_tempObject = new RequestBody();
+    if (index == 0) {
+        request->_tempObject = new (std::nothrow) RequestBody();
+        // The server otherwise free()s _tempObject without running String's
+        // destructor when a mobile client abandons a partially uploaded POST.
+        request->onDisconnect([request]() {
+            delete static_cast<RequestBody*>(request->_tempObject);
+            request->_tempObject = nullptr;
+        });
+    }
     auto* body = static_cast<RequestBody*>(request->_tempObject);
     if (!body) return;
     if (total > 4096 || body->json.length() + len > 4096) {
         body->overflow = true;
         return;
     }
-    body->json.concat(reinterpret_cast<const char*>(data), len);
+    if (!body->json.concat(reinterpret_cast<const char*>(data), len)) body->overflow = true;
 }
 
 void jsonFloat(char* dst, size_t size, float value, unsigned decimals) {
     if (isnan(value) || isinf(value)) strlcpy(dst, "null", size);
     else snprintf(dst, size, "%.*f", static_cast<int>(decimals), value);
 }
+
+bool keyAllowed(const uint8_t psk[16]) {
+    bool allZero = true;
+    bool allFF = true;
+    for (size_t i = 0; i < 16; ++i) {
+        allZero = allZero && psk[i] == 0;
+        allFF = allFF && psk[i] == 0xFF;
+    }
+    return !allZero && !allFF;
+}
 }
 
 WebDashboard::WebDashboard() {}
 
 bool WebDashboard::initLittleFS() {
-    if (!LittleFS.begin(true)) {
+    if (!LittleFS.begin(false)) {
         log_e("LittleFS mount failed");
         return false;
     }
@@ -56,13 +80,18 @@ void WebDashboard::begin(AsyncWebServer& server, const char* username, const cha
     _server->addHandler(_ws);
     registerApiHandlers();
     serveStaticFiles();
+#if PILOT_ENABLE_WEB_OTA
     registerOtaHandler();
+#endif
     _server->begin();
 }
 
 void WebDashboard::loop() {
-    if (_ws) _ws->cleanupClients(3);
-    if (_otaRestartPending && millis() >= _otaRestartAt) ESP.restart();
+    if (_ws && millis() - _lastCleanupMs >= 1000) {
+        _lastCleanupMs = millis();
+        _ws->cleanupClients(3);
+    }
+    if (_otaRestartPending && static_cast<int32_t>(millis() - _otaRestartAt) >= 0) ESP.restart();
 }
 
 bool WebDashboard::authorize(AsyncWebServerRequest* request) const {
@@ -80,6 +109,8 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
     (void)server;
     switch (type) {
         case WS_EVT_CONNECT:
+            client->setCloseClientOnQueueFull(false);
+            client->keepAlivePeriod(30);
             log_i("WS[%u] connected", client->id());
             break;
         case WS_EVT_DISCONNECT:
@@ -87,7 +118,7 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
             break;
         case WS_EVT_DATA: {
             AwsFrameInfo* info = (AwsFrameInfo*)arg;
-            if (info->final && info->index == 0 && info->len == len) {
+            if (info && info->opcode == WS_TEXT && info->final && info->index == 0 && info->len == len && len <= 1024) {
                 JsonDocument doc;
                 DeserializationError err = deserializeJson(doc, data, len);
                 if (!err) {
@@ -95,7 +126,10 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
                     if (action && strcmp(action, "toggle_valve") == 0) {
                         uint16_t nid = doc["node_id"] | 0;
                         bool on = doc["value"] | false;
-                        if (_control_cb) _control_cb(nid, on);
+                        const bool queued = _control_cb && _control_cb(nid, on);
+                        client->text(queued
+                            ? R"({"type":"command_result","status":"queued"})"
+                            : R"({"type":"command_result","status":"rejected"})");
                     } else if (action && strcmp(action, "remove_node") == 0) {
                         uint16_t nid = doc["node_id"] | 0;
                         if (_remove_cb) _remove_cb(nid);
@@ -108,13 +142,20 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
                         for (size_t i = 0; validHex && i < 32; ++i) validHex = isxdigit((unsigned char)psk_str[i]);
                         bool validType = type && (strcmp(type, "sensor") == 0 || strcmp(type, "actuator") == 0);
                         bool validAlias = alias && strlen(alias) <= 23;
-                        if (nid != 0 && validHex && validType && validAlias && _provision_cb) {
+                        if (nid != 0 && nid != 0xFFFF && validHex && validType && validAlias && _provision_cb) {
                             uint8_t psk[16];
                             for (int i = 0; i < 16; i++) {
                                 char byte_str[3] = {psk_str[i*2], psk_str[i*2+1], 0};
                                 psk[i] = strtol(byte_str, NULL, 16);
                             }
-                            _provision_cb(nid, psk, type, alias);
+                            if (keyAllowed(psk)) {
+                                _provision_cb(nid, psk, type, alias);
+                            } else {
+                                client->text(R"({"type":"provisioned","status":"weak_key"})");
+                            }
+                            memset(psk, 0, sizeof(psk));
+                        } else {
+                            client->text(R"({"type":"provisioned","status":"invalid_request"})");
                         }
                     } else if (action && strcmp(action, "set_actuator_config") == 0) {
                         uint16_t nid = doc["node_id"] | 0;
@@ -131,20 +172,19 @@ void WebDashboard::onWsEvent(AsyncWebSocket* server,
     }
 }
 
-void WebDashboard::pushSensorTelemetry(const SensorTelemetryData& d) {
-    if (!_ws) return;
-    char buf[320];
-    std::snprintf(buf, sizeof(buf),
-        R"({"type":"sensor","id":%u,"moisture_raw":%u,"moisture":%.1f,"temp":%.2f,)"
-        R"("batt":%.2f,"seq":%u,"rssi":%d,"errors":%u,"ts":%u,"epoch_ms":%llu})",
-        (unsigned)d.node_id, (unsigned)d.moisture_raw, d.moisture_percent, d.temperature_c,
-        d.battery_v, d.sequence, (int)d.rssi, d.error_flags, d.timestamp,
-        static_cast<unsigned long long>(d.epoch_ms));
-    _ws->textAll(buf);
+static void formatSensor(char* buf, size_t size, const SensorTelemetryData& d, uint32_t now) {
+    char moisture[20], temp[20], battery[20];
+    jsonFloat(moisture, sizeof(moisture), d.moisture_percent, 1);
+    jsonFloat(temp, sizeof(temp), d.temperature_c, 2);
+    jsonFloat(battery, sizeof(battery), d.battery_v, 2);
+    std::snprintf(buf, size,
+        R"({"type":"sensor","id":%u,"moisture_raw":%u,"moisture":%s,"temp":%s,)"
+        R"("batt":%s,"seq":%u,"rssi":%d,"errors":%u,"ts":%u,"epoch_ms":%llu,"age_ms":%u})",
+        (unsigned)d.node_id, (unsigned)d.moisture_raw, moisture, temp,
+        battery, d.sequence, (int)d.rssi, d.error_flags, d.timestamp,
+        static_cast<unsigned long long>(d.epoch_ms), now - d.timestamp);
 }
-void WebDashboard::pushWeatherTelemetry(const WeatherTelemetryData& d) {
-    if (!_ws) return;
-    char buf[384];
+static void formatWeather(char* buf, size_t size, const WeatherTelemetryData& d, uint32_t now) {
     char rain[20], wind[20], temp[20], hum[20], pres[20], lux[20], bat[20], dir[12];
     jsonFloat(rain, sizeof(rain), d.rain_mm, 2);
     jsonFloat(wind, sizeof(wind), d.wind_speed_ms, 2);
@@ -155,28 +195,93 @@ void WebDashboard::pushWeatherTelemetry(const WeatherTelemetryData& d) {
     jsonFloat(bat, sizeof(bat), d.battery_mv, 0);
     if (d.wind_dir_deg < 0) strlcpy(dir, "null", sizeof(dir));
     else snprintf(dir, sizeof(dir), "%d", d.wind_dir_deg);
-    std::snprintf(buf, sizeof(buf),
-        R"({"type":"weather","rain":%s,"wind":%s,"dir":%s,"temp":%s,"hum":%s,"pres":%s,"lux":%s,"bat":%s,"ts":%u,"epoch_ms":%llu})",
+    std::snprintf(buf, size,
+        R"({"type":"weather","rain":%s,"wind":%s,"dir":%s,"temp":%s,"hum":%s,"pres":%s,"lux":%s,"bat":%s,"ts":%u,"epoch_ms":%llu,"age_ms":%u})",
         rain, wind, dir, temp, hum, pres, lux, bat,
-        (unsigned)d.timestamp, static_cast<unsigned long long>(d.epoch_ms));
-    _ws->textAll(buf);
+        (unsigned)d.timestamp, static_cast<unsigned long long>(d.epoch_ms), now - d.timestamp);
 }
-void WebDashboard::pushActuatorState(const ActuatorStateData& d) {
-    if (!_ws) return;
-    char buf[384];
+static void formatActuator(char* buf, size_t size, const ActuatorStateData& d, uint32_t now) {
     auto val = [](float value) { return isnan(value) || isinf(value) ? -1.0f : value; };
-    std::snprintf(buf, sizeof(buf),
+    std::snprintf(buf, size,
         R"({"type":"actuator","id":%u,"valve":%s,"commanded":%s,"feedback_valid":%s,)"
         R"("batt":%.2f,"flow_lpm":%.2f,"pressure_bar":%.2f,"tank_pct":%.1f,)"
-        R"("pump_current_a":%.2f,"errors":%u,"ts":%u,"epoch_ms":%llu})",
+        R"("pump_current_a":%.2f,"errors":%u,"ts":%u,"epoch_ms":%llu,"age_ms":%u})",
         d.node_id, d.valve_open ? "true" : "false",
         d.valve_commanded_open ? "true" : "false", d.feedback_valid ? "true" : "false",
         d.battery_v, val(d.flow_lpm), val(d.line_pressure_bar), val(d.tank_pct), val(d.pump_current_a),
-        d.error_flags, d.timestamp, static_cast<unsigned long long>(d.epoch_ms));
-    _ws->textAll(buf);
+        d.error_flags, d.timestamp, static_cast<unsigned long long>(d.epoch_ms), now - d.timestamp);
+}
+
+void WebDashboard::pushSensorTelemetry(const SensorTelemetryData& d) {
+    {
+        std::lock_guard<std::mutex> lock(_telemetryMutex);
+        _sensors.put(d, millis());
+    }
+    char buf[384];
+    formatSensor(buf, sizeof(buf), d, millis());
+    broadcast(buf);
+}
+void WebDashboard::pushWeatherTelemetry(const WeatherTelemetryData& d) {
+    {
+        std::lock_guard<std::mutex> lock(_telemetryMutex);
+        _weather = d;
+        _hasWeather = true;
+    }
+    char buf[448];
+    formatWeather(buf, sizeof(buf), d, millis());
+    broadcast(buf);
+}
+void WebDashboard::pushActuatorState(const ActuatorStateData& d) {
+    {
+        std::lock_guard<std::mutex> lock(_telemetryMutex);
+        _actuators.put(d, millis());
+    }
+    char buf[448];
+    formatActuator(buf, sizeof(buf), d, millis());
+    broadcast(buf);
+}
+void WebDashboard::forgetNode(uint16_t nodeId) {
+    std::lock_guard<std::mutex> lock(_telemetryMutex);
+    _sensors.remove(nodeId);
+    _actuators.remove(nodeId);
+}
+std::string WebDashboard::telemetryJson() {
+    std::lock_guard<std::mutex> lock(_telemetryMutex);
+    const uint32_t now = millis();
+    std::string json = R"({"weather":)";
+    char buf[448];
+    if (_hasWeather) { formatWeather(buf, sizeof(buf), _weather, now); json += buf; }
+    else json += "null";
+    json += R"(,"sensors":[)";
+    bool first = true;
+    for (const auto& entry : _sensors.entries) {
+        if (!entry.used) continue;
+        if (!first) json += ',';
+        first = false;
+        formatSensor(buf, sizeof(buf), entry.value, now);
+        json += buf;
+    }
+    json += R"(],"actuators":[)";
+    first = true;
+    for (const auto& entry : _actuators.entries) {
+        if (!entry.used) continue;
+        if (!first) json += ',';
+        first = false;
+        formatActuator(buf, sizeof(buf), entry.value, now);
+        json += buf;
+    }
+    json += "]}";
+    return json;
+}
+void WebDashboard::broadcast(const char* json) {
+    if (!_ws || !json || !_ws->count()) return;
+    // A slow/background phone must not cause a reconnect/queue-exhaustion loop.
+    // Current readings and recommendations can be recovered through HTTP.
+    if (ESP.getFreeHeap() < 20000 || !_ws->availableForWriteAll()) { ++_wsDropped; return; }
+    _ws->textAll(json);
 }
 void WebDashboard::pushRaw(const char* json) {
-    if (_ws) _ws->textAll(json);
+    broadcast(json);
 }
 
 void WebDashboard::pushLog(const char* level, const char* message) {
@@ -185,7 +290,7 @@ void WebDashboard::pushLog(const char* level, const char* message) {
     std::snprintf(buf, sizeof(buf),
         R"({"type":"log","level":"%s","msg":"%s","ts":%u})",
         level, message, (unsigned)millis());
-    _ws->textAll(buf);
+    broadcast(buf);
 }
 
 void WebDashboard::serveStaticFiles() {
@@ -202,13 +307,19 @@ void WebDashboard::serveStaticFiles() {
 }
 
 void WebDashboard::registerApiHandlers() {
-    _server->on("/api/health", HTTP_GET, [](AsyncWebServerRequest* request) {
+    _server->on("/api/health", HTTP_GET, [this](AsyncWebServerRequest* request) {
         String json = "{";
         json += "\"uptime\":" + String(millis() / 1000);
         json += ",\"free_heap\":" + String(ESP.getFreeHeap());
+        json += ",\"min_free_heap\":" + String(ESP.getMinFreeHeap());
+        json += ",\"ws_dropped\":" + String(_wsDropped.load());
         json += ",\"rssi\":" + String(WiFi.RSSI());
+        if (_healthProvider) { json += ','; json += _healthProvider().c_str(); }
         json += "}";
         request->send(200, "application/json", json);
+    }).setAuthentication(_username, _password);
+    _server->on("/api/telemetry", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", telemetryJson().c_str());
     }).setAuthentication(_username, _password);
     _server->on("/api/nodes", HTTP_GET, [this](AsyncWebServerRequest* request) {
         if (_nodesProvider) {
@@ -318,10 +429,10 @@ void WebDashboard::registerApiHandlers() {
             }
             request->send(200, "application/json", R"({"status":"ok"})");
         }, nullptr, collectJsonBody).setAuthentication(_username, _password);
-    _server->on("/api/restart", HTTP_POST, [](AsyncWebServerRequest* request) {
+    _server->on("/api/restart", HTTP_POST, [this](AsyncWebServerRequest* request) {
         request->send(200, "application/json", R"({"status":"restarting"})");
-        delay(100);
-        ESP.restart();
+        _otaRestartAt = millis() + 750;
+        _otaRestartPending = true;
     }).setAuthentication(_username, _password);
     _server->on("/api/control", HTTP_POST,
         [this](AsyncWebServerRequest* request) {
@@ -338,8 +449,11 @@ void WebDashboard::registerApiHandlers() {
             if (nid == 0 || !doc["value"].is<bool>()) {
                 request->send(400, "application/json", R"({"error":"invalid_control"})"); return;
             }
-            if (_control_cb) _control_cb(nid, doc["value"].as<bool>());
-            request->send(200, "application/json", R"({"status":"ok"})");
+            if (!_control_cb || !_control_cb(nid, doc["value"].as<bool>())) {
+                request->send(409, "application/json", R"({"error":"command_rejected"})");
+                return;
+            }
+            request->send(202, "application/json", R"({"status":"queued"})");
         },
         nullptr,
         collectJsonBody).setAuthentication(_username, _password);

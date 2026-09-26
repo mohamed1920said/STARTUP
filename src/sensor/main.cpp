@@ -5,14 +5,24 @@
 #include <DallasTemperature.h>
 #include <Preferences.h>
 #include <LoraProtocol.h>
+#include <DeviceIdentity.h>
+#include <esp_sleep.h>
 
-const uint16_t NODE_ID      = 0x0001;
-const uint8_t  NODE_PSK[16] = {0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,
-                               0x88,0x99,0xAA,0xBB,0xCC,0xDD,0xEE,0xFF};
+#ifndef SENSOR_DEEP_SLEEP
+#define SENSOR_DEEP_SLEEP 1
+#endif
+#ifndef SENSOR_TX_INTERVAL_MS
+#define SENSOR_TX_INTERVAL_MS 120000UL
+#endif
+#ifndef SENSOR_PROVISION_WINDOW_MS
+#define SENSOR_PROVISION_WINDOW_MS 10000UL
+#endif
 
 const float    LORA_FREQ = 868.0f;
 Module loraMod(LORA_CS, LORA_IRQ, LORA_RST, RADIOLIB_NC);
 SX1276 radio(&loraMod);
+DeviceIdentity identity(DeviceRole::SENSOR);
+bool radioReady = false;
 
 const uint8_t MOISTURE_PIN = 34;
 const uint8_t ONE_WIRE_BUS = 4;
@@ -22,22 +32,26 @@ DallasTemperature ds18b20(&oneWire);
 const uint8_t BATT_PIN = 35;
 const int MOISTURE_DRY = 2500;
 const int MOISTURE_WET = 400;
-const uint32_t TX_INTERVAL_MS = 120000;
+const uint32_t TX_INTERVAL_MS = SENSOR_TX_INTERVAL_MS;
 uint32_t lastTxMs = 0;
-uint32_t seqCounter = 0;
-uint32_t seqLimit = 0;
+RTC_DATA_ATTR uint32_t seqCounter = 0;
+RTC_DATA_ATTR uint32_t seqLimit = 0;
 bool tempRequested = false;
 
 uint32_t nextPersistentSequence() {
     if (seqCounter >= seqLimit) {
         Preferences prefs;
         if (!prefs.begin("lora_seq", false)) return 0;
-        uint32_t start = prefs.getULong("next", 1);
+        const uint32_t start = prefs.getULong("next", 1);
         if (start == 0 || start > UINT32_MAX - 1024) { prefs.end(); return 0; }
-        seqCounter = start - 1;
-        seqLimit = start + 1023;
-        prefs.putULong("next", seqLimit + 1);
+        const uint32_t reservedLimit = start + 1023;
+        const uint32_t nextBlock = reservedLimit + 1;
+        const bool reserved = prefs.putULong("next", nextBlock) == sizeof(uint32_t) &&
+            prefs.getULong("next", 0) == nextBlock;
         prefs.end();
+        if (!reserved) return 0;
+        seqCounter = start - 1;
+        seqLimit = reservedLimit;
     }
     return ++seqCounter;
 }
@@ -49,6 +63,7 @@ float readBattery() {
 }
 
 bool sendTelemetry() {
+    if (!identity.ready() || !radioReady) return false;
     uint32_t sequence = nextPersistentSequence();
     if (sequence == 0) { Serial.println(F("[SN] Sequence space exhausted")); return false; }
     float battV = readBattery();
@@ -60,8 +75,8 @@ bool sendTelemetry() {
     float tempC = ds18b20.getTempCByIndex(0);
     bool tempOk = (tempC != DEVICE_DISCONNECTED_C);
     uint8_t err = 0;
-    if (moistADC > 4000 || moistADC < 10) err |= 0x01;
-    if (!tempOk) { tempC = 0; err |= 0x02; }
+    if (moistADC > 4000 || moistADC < 10) err |= SENSOR_ERROR_MOISTURE;
+    if (!tempOk) { tempC = 0; err |= SENSOR_ERROR_TEMPERATURE; }
 
     Serial.printf("[SN] Seq=%u Moist=%u Temp=%.2f Batt=%.2fV\n",
                   sequence, moistADC, tempC, battV);
@@ -79,19 +94,20 @@ bool sendTelemetry() {
     serializeTelemetry(pt, payload);
 
     LoraCrypto crypto;
-    crypto.setKey(NODE_PSK, 16);
+    crypto.setKey(identity.psk(), AES128_KEY_SIZE);
 
     uint8_t iv[GCM_IV_SIZE], mic[MIC_SIZE];
     CryptoResult cr = crypto.encrypt(pt, TELEMETRY_WIRE_SIZE,
                                       (uint8_t)PacketType::SENSOR_TELEMETRY,
-                                      sequence, NODE_ID, iv, mic);
+                                      sequence, identity.nodeId(), iv, mic);
     if (cr != CryptoResult::OK) {
         Serial.printf("[SN] Encrypt failed err=%d\n", (int)cr);
         return false;
     }
 
     uint8_t tx[LORA_MAX_PAYLOAD]; size_t o = 0;
-    uint8_t node_be[2] = { uint8_t(NODE_ID >> 8), uint8_t(NODE_ID & 0xFF) };
+    const uint16_t nodeId = identity.nodeId();
+    uint8_t node_be[2] = { uint8_t(nodeId >> 8), uint8_t(nodeId & 0xFF) };
     memcpy(tx+o, node_be, 2); o+=2;
     memcpy(tx+o, iv, 12);     o+=12;
     tx[o++] = (uint8_t)PacketType::SENSOR_TELEMETRY;
@@ -104,9 +120,60 @@ bool sendTelemetry() {
     return (st == RADIOLIB_ERR_NONE);
 }
 
+bool serviceIdentityConsole() {
+    const IdentityEvent event = identity.serviceConsole(Serial);
+    if (event == IdentityEvent::NONE) return false;
+    Serial.println(F("[SN] Restarting after identity change"));
+    Serial.flush();
+    delay(100);
+    ESP.restart();
+    return true;
+}
+
+void printProvisioningHelp() {
+    identity.printStatus(Serial);
+    if (identity.state() == IdentityState::EMPTY) {
+        Serial.println(F("[SN] Radio disabled. Use: PROVISION 0001 <32-hex-PSK>"));
+    } else if (identity.state() == IdentityState::CORRUPT ||
+               identity.state() == IdentityState::ROLE_MISMATCH) {
+        Serial.println(F("[SN] Radio disabled. Use: ERASE CORRUPT CONFIRM"));
+    } else {
+        Serial.println(F("[SN] Identity storage unavailable; radio remains disabled"));
+    }
+}
+
+void enterDeepSleep() {
+#if SENSOR_DEEP_SLEEP
+    if (radioReady) radio.sleep();
+    Serial.printf("[SN] Sleeping for %lu seconds\n", static_cast<unsigned long>(TX_INTERVAL_MS / 1000UL));
+    Serial.flush();
+    esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(TX_INTERVAL_MS) * 1000ULL);
+    esp_deep_sleep_start();
+#endif
+}
+
 void setup() {
     Serial.begin(115200); delay(100);
-    Serial.printf("[SN] Sensor Node %04X starting (no deep sleep)\n", NODE_ID);
+    identity.begin();
+    if (!identity.ready()) {
+        printProvisioningHelp();
+        return;
+    }
+
+#if SENSOR_DEEP_SLEEP
+    // Timer wakes skip this window. A power-on/reset gives a technician time
+    // to inspect or remove identity through the physical serial connection.
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) {
+        Serial.println(F("[SN] Physical-serial maintenance window: 10 seconds"));
+        const uint32_t windowStart = millis();
+        while (millis() - windowStart < SENSOR_PROVISION_WINDOW_MS) {
+            if (serviceIdentityConsole()) return;
+            delay(10);
+        }
+    }
+#endif
+
+    Serial.printf("[SN] Sensor Node %04X starting\n", identity.nodeId());
 
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
     int st = radio.begin(LORA_FREQ, 125.0f, 9, 5,
@@ -114,6 +181,7 @@ void setup() {
     if (st != RADIOLIB_ERR_NONE) {
         Serial.printf("[SN] LoRa error: %d\n", st);
     } else {
+        radioReady = true;
         Serial.println(F("[SN] LoRa ready"));
     }
 
@@ -122,13 +190,21 @@ void setup() {
     tempRequested = true;
     sendTelemetry();
     lastTxMs = millis();
+    enterDeepSleep();
 }
 
 void loop() {
+    if (serviceIdentityConsole()) return;
+    if (!identity.ready()) { delay(20); return; }
+#if !SENSOR_DEEP_SLEEP
     uint32_t now = millis();
     if (now - lastTxMs >= TX_INTERVAL_MS) {
         lastTxMs = now;
         sendTelemetry();
     }
     delay(100);
+#else
+    // esp_deep_sleep_start() should not return. Remain fail-quiet if it does.
+    delay(1000);
+#endif
 }

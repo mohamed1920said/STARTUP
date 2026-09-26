@@ -1,249 +1,44 @@
-<!DOCTYPE html>
-<html lang="en" data-theme="system">
-
+<!doctype html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>IoT Horizon | LoRa Enterprise</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-    rel="stylesheet">
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <link rel="stylesheet" href="/style.css">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f5f5f7"><title>AMR · Your farm</title>
+<link rel="icon" href="data:,"><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
 </head>
-
 <body>
-
-  <div class="app-layout">
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <div class="logo">
-          <i data-lucide="radio-tower" class="logo-icon"></i>
-          <span class="logo-text">IoT Horizon</span>
-        </div>
-        <button class="icon-btn mobile-close" id="sidebar-close">
-          <i data-lucide="x"></i>
-        </button>
-      </div>
-
-      <div class="sidebar-nav">
-        <div class="nav-section">MAIN</div>
-        <a href="#summary" class="nav-item active"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></a>
-        <a href="#sensors" class="nav-item"><i data-lucide="cpu"></i><span>Sensors</span></a>
-        <a href="#actuators" class="nav-item"><i data-lucide="droplets"></i><span>Actuators</span></a>
-        <a href="#weather" class="nav-item"><i data-lucide="cloud-rain"></i><span>Weather</span></a>
-        <a href="#edge-ai" class="nav-item"><i data-lucide="brain-circuit"></i><span>Edge AI</span></a>
-        <a href="#data-collection" class="nav-item"><i data-lucide="brain-circuit"></i><span>AI Dataset</span></a>
-
-        <div class="nav-section">MANAGEMENT</div>
-        <a href="#registered-nodes" class="nav-item"><i data-lucide="server"></i><span>Device Fleet</span></a>
-        <a href="#provisioning" class="nav-item"><i data-lucide="plus-circle"></i><span>Provisioning</span></a>
-        <a href="#cloud-config" class="nav-item"><i data-lucide="cloud"></i><span>Cloud Sync</span></a>
-        <a href="#ota" class="nav-item"><i data-lucide="download-cloud"></i><span>OTA Updates</span></a>
-
-        <div class="nav-section">SYSTEM</div>
-        <a href="#log" class="nav-item"><i data-lucide="terminal-square"></i><span>Audit Logs</span></a>
-      </div>
-
-      <div class="sidebar-footer">
-        <div class="user-profile">
-          <img src="https://ui-avatars.com/api/?name=Admin+User&background=58a6ff&color=fff" alt="User" class="avatar">
-          <div class="user-info">
-            <span class="user-name">Admin User</span>
-            <span class="user-role">System Architect</span>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <div class="main-wrapper">
-      <header class="topbar">
-        <div class="topbar-left">
-          <button class="icon-btn" id="sidebar-toggle">
-            <i data-lucide="menu"></i>
-          </button>
-          <div class="breadcrumb">
-            <span>Overview</span>
-            <i data-lucide="chevron-right"></i>
-            <span class="current">Live Dashboard</span>
-          </div>
-        </div>
-
-        <div class="topbar-right">
-          <div id="health-bar" class="status-pill">
-            <i data-lucide="activity"></i>
-            <span id="health-status">Connecting...</span>
-          </div>
-          <div class="status-pill clock-pill">
-            <i data-lucide="clock"></i>
-            <span id="clock"></span>
-          </div>
-          <div class="divider"></div>
-          <button class="icon-btn theme-toggle" id="theme-btn" title="Toggle Theme">
-            <i data-lucide="sun" class="sun-icon"></i>
-            <i data-lucide="moon" class="moon-icon"></i>
-          </button>
-          <button class="icon-btn notification-btn">
-            <i data-lucide="bell"></i>
-            <span class="badge">3</span>
-          </button>
-        </div>
-      </header>
-
-      <main class="content">
-        <div class="page-header">
-          <div>
-            <h2>Enterprise IoT Dashboard</h2>
-            <p class="subtitle">Real-time monitoring and control of your agricultural nodes.</p>
-          </div>
-          <button id="restart-btn" class="btn-danger" onclick="restartGw()">
-            <i data-lucide="power"></i> Restart Gateway
-          </button>
-        </div>
-
-        <section id="summary">
-          <div class="kpi-grid">
-            <div class="kpi-card">
-              <div class="kpi-icon blue"><i data-lucide="activity"></i></div>
-              <div class="kpi-data">
-                <label>Gateway Uptime</label>
-                <div class="kpi-value"><span id="gw-uptime">--</span><span class="unit">s</span></div>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-icon green"><i data-lucide="database"></i></div>
-              <div class="kpi-data">
-                <label>Free Memory</label>
-                <div class="kpi-value"><span id="gw-heap">--</span><span class="unit">KB</span></div>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-icon purple"><i data-lucide="wifi"></i></div>
-              <div class="kpi-data">
-                <label>WiFi Signal</label>
-                <div class="kpi-value"><span id="gw-rssi">--</span><span class="unit">dBm</span></div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="weather">
-          <div class="section-title">
-            <h3><i data-lucide="cloud-sun"></i> Weather Station</h3>
-          </div>
-          <div class="kpi-grid">
-            <div class="kpi-card">
-              <div class="kpi-icon orange"><i data-lucide="thermometer"></i></div>
-              <div class="kpi-data">
-                <label>Temperature</label>
-                <div class="kpi-value"><span id="w-temp">--</span><span class="unit">°C</span></div>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-icon cyan"><i data-lucide="droplets"></i></div>
-              <div class="kpi-data">
-                <label>Humidity</label>
-                <div class="kpi-value"><span id="w-hum">--</span><span class="unit">%</span></div>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-icon purple"><i data-lucide="gauge"></i></div>
-              <div class="kpi-data">
-                <label>Pressure</label>
-                <div class="kpi-value"><span id="w-pres">--</span><span class="unit">hPa</span></div>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-icon blue"><i data-lucide="umbrella"></i></div>
-              <div class="kpi-data">
-                <label>Precipitation</label>
-                <div class="kpi-value"><span id="rain">--</span><span class="unit">mm</span></div>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-icon teal"><i data-lucide="wind"></i></div>
-              <div class="kpi-data">
-                <label>Wind Speed</label>
-                <div class="kpi-value"><span id="wind">--</span><span class="unit">km/h</span></div>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-icon indigo"><i data-lucide="compass"></i></div>
-              <div class="kpi-data">
-                <label>Wind Dir</label>
-                <div class="kpi-value"><span id="wind-dir">--</span><span class="unit">°</span></div>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-icon yellow"><i data-lucide="sun"></i></div>
-              <div class="kpi-data">
-                <label>Luminosity</label>
-                <div class="kpi-value"><span id="w-lux">--</span><span class="unit">lux</span></div>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-icon green"><i data-lucide="battery-charging"></i></div>
-              <div class="kpi-data">
-                <label>Battery</label>
-                <div class="kpi-value"><span id="w-bat">--</span><span class="unit">%</span></div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="edge-ai" class="edge-ai-section">
-          <div class="section-title ai-section-title">
-            <h3><i data-lucide="brain-circuit"></i> Edge AI Irrigation Advisor</h3>
-            <span id="ai-mode" class="ai-mode shadow">SHADOW MODE</span>
-          </div>
-          <p class="ai-explainer">Local ESP32-S3 decisions. Safety rules remain independent from model predictions.</p>
-          <div class="ai-forecast-grid">
-            <div class="ai-forecast-card"><label>Tomorrow temperature</label><strong><span id="ai-f-temp">--</span> °C</strong></div>
-            <div class="ai-forecast-card"><label>Rain probability</label><strong><span id="ai-f-rain-p">--</span>%</strong></div>
-            <div class="ai-forecast-card"><label>Predicted rain</label><strong><span id="ai-f-rain">--</span> mm</strong></div>
-            <div class="ai-forecast-card"><label>Predicted ET₀</label><strong><span id="ai-f-et0">--</span> mm</strong></div>
-          </div>
-          <div id="ai-zone-cards" class="ai-zone-grid">
-            <div id="ai-placeholder" class="empty-state">
-              <i data-lucide="scan-search" class="pulse-icon"></i>
-              <p>Waiting for a sensor reading to calculate the first recommendation...</p>
-            </div>
-          </div>
-        </section>
-
-        <div class="node-sections-wrapper">
-          <section id="sensors">
-            <div class="section-title">
-              <h3><i data-lucide="cpu"></i> Active Sensors</h3>
-            </div>
-            <div id="sensor-cards">
-              <div id="sensor-placeholder" class="empty-state">
-                <i data-lucide="radio-receiver" class="pulse-icon"></i>
-                <p>Waiting for sensor telemetry...</p>
-              </div>
-            </div>
-          </section>
-
-          <section id="actuators">
-            <div class="section-title">
-              <h3><i data-lucide="droplet"></i> Irrigation Actuators</h3>
-            </div>
-            <div id="actuator-cards">
-              <div class="empty-state">
-                <i data-lucide="power-off"></i>
-                <p>No actuator data available</p>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <div class="management-grid">
-          <div class="left-col">
-            <section id="provisioning" class="panel">
-              <div class="panel-header">
-                <h3><i data-lucide="plus-square"></i> Provision Node</h3>
+<a class="skip-link" href="#main">Skip to content</a>
+<aside class="sidebar"><a class="brand" href="#overview" data-nav="overview"><span class="brand-mark">A</span><span>AMR<small>Connected agriculture</small></span></a><nav class="desktop-nav" aria-label="Main navigation"><a href="#overview" data-nav="overview">⌂<span>Overview</span></a><a href="#irrigation" data-nav="irrigation">♧<span>Irrigation</span></a><a href="#devices" data-nav="devices">▦<span>Devices</span></a><a href="#settings" data-nav="settings">☷<span>Settings</span></a></nav><div class="sidebar-foot">● Local farm dashboard<p>Your data, at the farm.</p></div></aside>
+<div class="main-wrapper">
+<header class="topbar"><span id="view-title">Overview</span><div class="topbar-right"><span id="health-status" role="status">Connecting…</span><span id="clock" class="clock"></span><button id="refresh-btn" class="icon-btn" aria-label="Refresh dashboard" title="Refresh">↻</button></div></header>
+<main id="main" class="content">
+<div id="connection-banner" class="connection-banner" role="status" hidden><p id="connection-detail"></p></div>
+<section data-view="overview" aria-labelledby="overview-title">
+<div class="page-header"><p class="eyebrow">YOUR FARM, AT A GLANCE</p><h1 id="overview-title">Overview</h1><p class="subtitle">A little clarity for your day in the field.</p></div>
+<div class="overview-grid">
+<section id="weather" class="weather-hero card"><div class="card-top"><h2>At your weather station</h2><span class="subtle-pill">Observed</span></div><div class="weather-main"><div class="weather-temperature"><span id="w-temp">—</span>°</div><svg class="weather-symbol" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="21"/><path d="M50 7v9M50 84v9M7 50h9M84 50h9M20 20l7 7M73 73l7 7M20 80l7-7M73 27l7-7"/></svg></div><p class="weather-caption">Air temperature · Celsius</p><p id="weather-updated" class="small-note">Waiting for a station observation</p><div class="weather-bottom"><div><span>Humidity</span><strong><span id="w-hum">—</span><small>%</small></strong></div><div><span>Wind</span><strong><span id="wind">—</span><small>km/h</small></strong></div><div><span>Rain / interval</span><strong><span id="rain">—</span><small>mm</small></strong></div></div></section>
+<section class="advice-card card"><div class="card-top"><h2>Irrigation outlook</h2><span class="subtle-pill">On your gateway</span></div><div class="advice-body"><p class="eyebrow">NEXT STEP</p><h2 id="overview-recommendation">Checking your field</h2><p id="overview-reason">Your latest recommendation will appear here.</p></div><a class="text-link" href="#irrigation" data-nav="irrigation">Review irrigation <span>›</span></a></section>
+</div>
+<div class="section-title"><h2>Conditions</h2><span>On-site measurements</span></div><div class="conditions-grid">
+<div class="condition"><span>Pressure</span><strong><span id="w-pres">—</span><small>hPa</small></strong></div><div class="condition"><span>Wind direction</span><strong><span id="wind-dir">—</span><small>°</small></strong></div><div class="condition"><span>Light level</span><strong><span id="w-lux">—</span><small>lux</small></strong></div><div class="condition"><span>Station battery</span><strong><span id="w-bat">—</span><small>V</small></strong></div>
+</div><p class="footnote">Measurements come from your connected station. Missing values remain blank until a valid reading arrives.</p>
+</section>
+<section data-view="irrigation" hidden aria-labelledby="irrigation-title">
+<div class="page-header"><p class="eyebrow">WATER WITH CONFIDENCE</p><h1 id="irrigation-title">Irrigation</h1><p class="subtitle">Understand the soil. Choose the right moment.</p></div>
+<section id="edge-ai"><div class="section-title"><h2>Field recommendations</h2><span id="ai-mode" class="ai-mode shadow">Advisory only</span></div><p class="small-note">Advice is calculated on your gateway. Review field conditions before watering. Valve automation is configured separately.</p>
+<div id="ai-zone-cards" class="ai-zone-grid"><div id="ai-placeholder" class="empty-state"><strong>Checking sensor data</strong><p>The gateway will explain whether a reading, weather data or field setup is needed.</p></div></div>
+<div class="section-title"><h2>Local weather estimate</h2><span>Next 24 hours</span></div><div class="ai-forecast-grid">
+<div class="ai-forecast-card"><label>Temperature</label><strong><span id="ai-f-temp">—</span><small>°C</small></strong></div><div class="ai-forecast-card"><label>Rain likelihood</label><strong><span id="ai-f-rain-p">—</span><small>%</small></strong></div><div class="ai-forecast-card"><label>Estimated rain</label><strong><span id="ai-f-rain">—</span><small>mm</small></strong></div><div class="ai-forecast-card"><label>Reference ET₀</label><strong><span id="ai-f-et0">—</span><small>mm</small></strong></div></div>
+<p class="footnote">Experimental local model estimates. These are not an official weather forecast; unavailable inputs are shown as dashes.</p></section>
+<section id="actuators"><div class="section-title"><h2>Valves</h2><span>Manual control</span></div><div id="actuator-cards"><div class="empty-state"><strong>No actuator reading yet</strong><p>Power on your registered valve node to receive its heartbeat.</p></div></div></section>
+</section>
+<section data-view="devices" hidden aria-labelledby="devices-title">
+<div class="page-header"><p class="eyebrow">CONNECTED TO YOUR LAND</p><h1 id="devices-title">Devices</h1><p class="subtitle">The latest observations from your soil sensors.</p></div>
+<section id="sensors"><div class="section-title"><h2>Soil sensors</h2><a href="#settings" data-nav="settings" class="text-link">Manage devices ›</a></div><div id="sensor-cards"><div id="sensor-placeholder" class="empty-state"><strong>No soil reading yet</strong><p>Register a sensor in Settings and keep it powered within LoRa range. Sensor reports normally arrive every two minutes.</p></div></div></section><p class="footnote">Moisture charts show readings received during this browser session. Battery voltage is measured.</p></section>
+<section data-view="settings" hidden aria-labelledby="settings-title">
+<div class="page-header"><p class="eyebrow">MAKE IT YOURS</p><h1 id="settings-title">Settings</h1><p class="subtitle">Your gateway, field profiles and connected devices.</p></div>
+<section id="summary" class="card gateway-card"><div class="section-title"><h2>Central gateway</h2><span class="subtle-pill">ESP32-S3</span></div><div class="gateway-metrics"><div><span>Uptime</span><strong><span id="gw-uptime">—</span><small>s</small></strong></div><div><span>Free memory</span><strong><span id="gw-heap">—</span><small>KB</small></strong></div><div><span>Wi-Fi signal</span><strong><span id="gw-rssi">—</span><small>dBm</small></strong></div></div><p id="gateway-diagnostics" class="small-note"></p><button id="restart-btn" class="btn-danger" onclick="restartGw()">Restart gateway</button></section>
+<div class="settings-group"><details><summary>Add a device</summary><section id="provisioning" class="panel">
+              <div class="panel-header"><h3>Add a device</h3>
               </div>
               <div class="panel-body">
                 <form id="provision-form" class="modern-form">
@@ -272,11 +67,9 @@
                   </div>
                 </form>
               </div>
-            </section>
-
-            <section id="data-collection" class="panel">
-              <div class="panel-header">
-                <h3><i data-lucide="brain-circuit"></i> AI Dataset Collection</h3>
+            </section></details>
+<details><summary>Field profile & observations</summary><section id="data-collection" class="panel">
+              <div class="panel-header"><h3>Field profile & observations</h3>
               </div>
               <div class="panel-body">
                 <div id="dataset-status" class="status-msg">Loading dataset status...</div>
@@ -317,58 +110,9 @@
                   <div class="form-actions full-width"><button type="submit" class="btn-secondary">Add Event Marker</button><div id="dataset-label-status" class="status-msg"></div></div>
                 </form>
               </div>
-            </section>
-
-            <section id="cloud-config" class="panel">
-              <div class="panel-header">
-                <h3><i data-lucide="cloud"></i> Cloud Synchronization</h3>
-              </div>
-              <div class="panel-body">
-                <form id="cloud-form" class="modern-form">
-                  <div class="form-group full-width">
-                    <label>Endpoint URL</label>
-                    <input type="url" id="c-url" placeholder="https://cloud.example.com" required>
-                  </div>
-                  <div class="form-group full-width">
-                    <label>API Key</label>
-                    <input type="password" id="c-apikey" placeholder="Enter API Key">
-                  </div>
-                  <div class="form-group full-width">
-                    <label>Trusted root CA certificate (PEM)</label>
-                    <textarea id="c-cacert" rows="7" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
-                  </div>
-                  <div class="form-actions full-width">
-                    <button type="submit" class="btn-secondary">Save Configuration</button>
-                    <div id="cloud-status" class="status-msg"></div>
-                  </div>
-                </form>
-              </div>
-            </section>
-
-            <section id="ota" class="panel">
-              <div class="panel-header">
-                <h3><i data-lucide="download-cloud"></i> Firmware OTA</h3>
-              </div>
-              <div class="panel-body">
-                <form id="ota-form" enctype="multipart/form-data" class="modern-form file-form">
-                  <div class="file-upload-wrapper">
-                    <i data-lucide="upload-cloud"></i>
-                    <span>Drag & drop or click to select .bin file</span>
-                    <input type="file" name="firmware" accept=".bin" required>
-                  </div>
-                  <div class="form-actions">
-                    <button type="submit" class="btn-secondary">Initiate Update</button>
-                    <div id="ota-progress" class="status-msg"></div>
-                  </div>
-                </form>
-              </div>
-            </section>
-          </div>
-
-          <div class="right-col">
-            <section id="registered-nodes" class="panel table-panel">
-              <div class="panel-header">
-                <h3><i data-lucide="server"></i> Device Fleet</h3>
+            </section></details>
+<details><summary>Registered devices</summary><section id="registered-nodes" class="panel table-panel">
+              <div class="panel-header"><h3>Registered devices</h3>
                 <div class="search-box">
                   <i data-lucide="search"></i>
                   <input type="text" placeholder="Search nodes...">
@@ -391,71 +135,46 @@
                   <tbody id="nodes-tbody"></tbody>
                 </table>
               </div>
-            </section>
-
-            <section id="log" class="panel terminal-panel">
+            </section></details>
+<details><summary>Cloud connection</summary><section id="cloud-config" class="panel">
+              <div class="panel-header"><h3>Cloud connection</h3>
+              </div>
+              <div class="panel-body">
+                <form id="cloud-form" class="modern-form">
+                  <div class="form-group full-width">
+                    <label>Endpoint URL</label>
+                    <input type="url" id="c-url" placeholder="https://cloud.example.com" required>
+                  </div>
+                  <div class="form-group full-width">
+                    <label>API Key</label>
+                    <input type="password" id="c-apikey" placeholder="Enter API Key">
+                  </div>
+                  <div class="form-group full-width">
+                    <label>Trusted root CA certificate (PEM)</label>
+                    <textarea id="c-cacert" rows="7" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+                  </div>
+                  <div class="form-actions full-width">
+                    <button type="submit" class="btn-secondary">Save Configuration</button>
+                    <div id="cloud-status" class="status-msg"></div>
+                  </div>
+                </form>
+              </div>
+            </section></details>
+<details><summary>Firmware update</summary><section id="ota" class="panel">
+              <div class="panel-header"><h3>Firmware update</h3>
+              </div>
+              <div class="panel-body">
+                <p>Web firmware upload is disabled in the supervised pilot build because images are not signed. Update the gateway over physical USB with PlatformIO.</p>
+              </div>
+            </section></details>
+<details><summary>Activity log</summary><section id="log" class="panel terminal-panel">
               <div class="terminal-header">
                 <div class="dots"><span></span><span></span><span></span></div>
                 <div class="terminal-title">System Audit Log</div>
                 <div class="terminal-actions"><i data-lucide="copy"></i></div>
               </div>
               <pre id="log-output" class="terminal-body"></pre>
-            </section>
-          </div>
-        </div>
-
-      </main>
-    </div>
-  </div>
-
-  <div id="toast-container" class="toast-container"></div>
-
-  <script src="/app.js"></script>
-
-  <script>
-    // Initialize Icons
-    if (window.lucide) lucide.createIcons();
-
-    // Theme Management
-    const themeBtn = document.getElementById('theme-btn');
-    const htmlEl = document.documentElement;
-
-    function applyTheme(theme) {
-      if (theme === 'system') {
-        const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        htmlEl.setAttribute('data-theme', systemTheme);
-      } else {
-        htmlEl.setAttribute('data-theme', theme);
-      }
-      localStorage.setItem('iot-theme', theme);
-    }
-
-    const savedTheme = localStorage.getItem('iot-theme') || 'system';
-    applyTheme(savedTheme);
-
-    themeBtn.addEventListener('click', () => {
-      const current = htmlEl.getAttribute('data-theme');
-      applyTheme(current === 'dark' ? 'light' : 'dark');
-    });
-
-    // Sidebar Mobile Toggle
-    const sidebar = document.getElementById('sidebar');
-    const sidebarToggle = document.getElementById('sidebar-toggle');
-    const sidebarClose = document.getElementById('sidebar-close');
-
-    sidebarToggle.addEventListener('click', () => sidebar.classList.add('open'));
-    sidebarClose.addEventListener('click', () => sidebar.classList.remove('open'));
-
-    // Highlight active nav item on scroll
-    const navItems = document.querySelectorAll('.nav-item');
-    navItems.forEach(item => {
-      item.addEventListener('click', () => {
-        document.querySelector('.nav-item.active').classList.remove('active');
-        item.classList.add('active');
-        if (window.innerWidth <= 768) sidebar.classList.remove('open');
-      });
-    });
-  </script>
-</body>
-
-</html>
+            </section></details></div><p class="footnote">AMR · Local farm dashboard. Administrator access.</p>
+</section>
+</main></div><nav class="tabbar" aria-label="Mobile navigation"><a href="#overview" data-nav="overview">⌂<span>Overview</span></a><a href="#irrigation" data-nav="irrigation">♧<span>Irrigation</span></a><a href="#devices" data-nav="devices">▦<span>Devices</span></a><a href="#settings" data-nav="settings">☷<span>Settings</span></a></nav><div id="toast-container" class="toast-container" role="status" aria-live="polite"></div>
+</body></html>

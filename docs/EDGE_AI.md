@@ -16,7 +16,7 @@ valve command. Existing threshold automation remains available independently.
 | Farmer question | Gateway output |
 |---|---|
 | Does this field need irrigation now? | `irrigation_needed`, `irrigation_now`, probability and explanation |
-| How many minutes should the valve run? | water depth, total minutes, maximum 30-minute cycle and cycle count |
+| How long should watering run? | water depth, total duration, 300-second pilot command cycles and cycle count |
 | Can irrigation wait? | rain-delay flag, slow-drying flag and wait hours |
 | Did watering increase soil moisture? | pending, moisture increased, or no response, with measured percentage-point change |
 | Is equipment unhealthy? | leak, blocked pipe, empty tank, stuck valve, sensor fault or weak battery |
@@ -33,7 +33,7 @@ The model is a hybrid design:
 3. Deterministic safety rules override model output for valve disagreement,
    impossible sensor values, low batteries, empty tanks and abnormal flow.
 4. Runtime is calculated from predicted millimetres, configured zone area and
-   total emitter flow. A single command can never exceed 30 minutes.
+   total emitter flow. The supervised-pilot actuator caps a command at 300 seconds.
 5. The actuator's own timeout and feedback protections remain authoritative.
 
 Model code:
@@ -69,7 +69,7 @@ current and firmware error flags. Missing optional hydraulic sensors remain
 - A drying rate above -0.7 percentage points/day with ET₀ below 4 mm/day delays
   irrigation for 12 hours.
 - Non-critical watering is scheduled in a cooler 05:00-09:00 or 19:00 window.
-- Long applications are split into 30-minute cycles. Hydraulic hardware must
+- Long applications must be split into 300-second pilot cycles. Hydraulic hardware must
   provide the spacing and pressure capacity required for multiple cycles.
 
 ## Watering-effect verification
@@ -175,6 +175,6 @@ Do not change it until all of the following are complete:
    fail-safe behaviour on the actual hydraulic installation.
 7. Approve the model version and dataset hash in a documented release process.
 
-After those gates pass, set `EDGE_AI_ALLOW_CONTROL=1`, rebuild, and perform a
-supervised pilot. Never remove actuator timeout, feedback, flow, pressure or
-battery protection when enabling AI.
+Keep `EDGE_AI_ALLOW_CONTROL=0` throughout this supervised pilot. A later control
+trial requires a separately reviewed release after every gate above passes. Never
+remove actuator timeout, feedback, flow, pressure or battery protection.

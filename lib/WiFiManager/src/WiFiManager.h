@@ -50,6 +50,9 @@ private:
     bool _configDone = false;
     bool _pendingConnect = false;
     bool _connecting = false;
+    bool _wasConnected = false;
+    unsigned long _connectStartedAt = 0;
+    unsigned long _lastReconnectAttempt = 0;
     IPAddress _configIP;
 
     uint8_t _resetPin = RESET_PIN_DEFAULT;

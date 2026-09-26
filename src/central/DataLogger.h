@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <atomic>
 #include <string>
 
 struct DatasetRecord {
@@ -76,13 +77,14 @@ public:
                   uint32_t uptimeMs, uint32_t bootId);
     bool clear();
     std::string statusJson() const;
+    uint32_t stackHighWaterMark() const;
 
 private:
     QueueHandle_t _queue = nullptr;
     SemaphoreHandle_t _fileMutex = nullptr;
     TaskHandle_t _task = nullptr;
-    volatile uint32_t _recordCount = 0;
-    volatile uint32_t _droppedCount = 0;
+    std::atomic<uint32_t> _recordCount{0};
+    std::atomic<uint32_t> _droppedCount{0};
 
     static void taskEntry(void* arg);
     void taskLoop();

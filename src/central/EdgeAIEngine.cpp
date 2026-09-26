@@ -13,6 +13,41 @@ namespace {
 constexpr uint64_t DAY_MS = 86400000ULL;
 constexpr uint64_t HOUR_MS = 3600000ULL;
 constexpr float PI_F = 3.14159265358979323846f;
+constexpr uint8_t SENSOR_MOISTURE_FAULT = 0x01;
+constexpr uint8_t SENSOR_TEMPERATURE_FAULT = 0x02;
+constexpr uint8_t ACTUATOR_FEEDBACK_MISMATCH = 0x02;
+
+class EngineLock {
+public:
+    explicit EngineLock(SemaphoreHandle_t mutex) : _mutex(mutex),
+        _held(mutex && xSemaphoreTake(mutex, pdMS_TO_TICKS(50)) == pdTRUE) {}
+    ~EngineLock() { if (_held) xSemaphoreGive(_mutex); }
+    explicit operator bool() const { return _held; }
+private:
+    SemaphoreHandle_t _mutex;
+    bool _held;
+};
+
+bool inRange(float value, float low, float high) {
+    return std::isfinite(value) && value >= low && value <= high;
+}
+
+std::string jsonNumber(float value, unsigned precision = 2) {
+    if (!std::isfinite(value)) return "null";
+    char number[32];
+    snprintf(number, sizeof(number), "%.*f", static_cast<int>(precision), value);
+    return number;
+}
+
+const char* predictionReason(const EdgeAIPrediction& prediction) {
+    if (prediction.sensorReceived &&
+        static_cast<uint32_t>(millis() - prediction.receivedAtMs) > EdgeAIEngine::SENSOR_STALE_MS)
+        return "Soil sensor telemetry is stale. Check sensor power and the LoRa link; recommendations are paused.";
+    if (prediction.valid && prediction.weatherAvailable &&
+        static_cast<uint32_t>(millis() - prediction.weatherReceivedAtMs) > EdgeAIEngine::WEATHER_STALE_MS)
+        return "Weather inputs are stale. Water amount, runtime and rain-based scheduling are paused until fresh weather arrives.";
+    return prediction.reason;
+}
 
 float clampValue(float value, float low, float high) {
     if (!std::isfinite(value)) return low;
@@ -67,7 +102,13 @@ int dayOfYear(uint64_t epochMs) {
 }
 
 void EdgeAIEngine::begin() {
+    // Called once in setup, before LoRa/HTTP tasks are started.
+    if (!_mutex) _mutex = xSemaphoreCreateMutex();
+    EngineLock lock(_mutex);
+    if (!lock) return;
     _weatherValid = false;
+    _weatherReceivedAtMs = 0;
+    _latestWeather = {};
     _forecast = {};
     for (auto& zone : _zones) zone = {};
     for (auto& day : _weatherHistory) day = {};
@@ -100,10 +141,18 @@ const EdgeAIEngine::ZoneState* EdgeAIEngine::findZone(uint16_t sensorId) const {
 }
 
 void EdgeAIEngine::updateWeather(const EdgeAIWeatherReading& reading) {
-    if (!std::isfinite(reading.temperatureC) && !std::isfinite(reading.pressureHpa) &&
-        !std::isfinite(reading.rainMm)) return;
+    EngineLock lock(_mutex);
+    if (!lock) return;
     _latestWeather = reading;
-    _weatherValid = true;
+    _weatherReceivedAtMs = millis();
+    // A disconnected rain gauge reads zero. That alone is not enough to infer
+    // temperature, rainfall or evapotranspiration using model-mean inputs.
+    _weatherValid = inRange(reading.temperatureC, -40.0f, 60.0f) &&
+        inRange(reading.humidityPct, 0.0f, 100.0f) &&
+        inRange(reading.pressureHpa, 300.0f, 1100.0f) &&
+        inRange(reading.rainMm, 0.0f, 200.0f) &&
+        inRange(reading.windMs, 0.0f, 100.0f);
+    if (!_weatherValid) { _forecast = {}; return; }
     const uint32_t day = reading.epochMs >= 1577836800000ULL
         ? static_cast<uint32_t>(reading.epochMs / DAY_MS) : 0;
     if (!_currentDay.valid || _currentDay.dayNumber != day) {
@@ -132,7 +181,7 @@ void EdgeAIEngine::updateWeather(const EdgeAIWeatherReading& reading) {
 }
 
 void EdgeAIEngine::updateWeatherForecast() {
-    if (!_weatherValid) {
+    if (!_weatherValid || _latestWeather.epochMs < 1577836800000ULL) {
         _forecast = {};
         return;
     }
@@ -173,6 +222,8 @@ void EdgeAIEngine::updateWeatherForecast() {
 
 void EdgeAIEngine::updateActuator(const EdgeAIActuatorReading& reading) {
     if (reading.linkedSensorId == 0) return;
+    EngineLock lock(_mutex);
+    if (!lock) return;
     ZoneState& zone = zoneFor(reading.linkedSensorId);
     zone.actuatorId = reading.actuatorId;
     const bool wasOpen = zone.actuatorValid && zone.actuator.valveActual;
@@ -191,6 +242,7 @@ void EdgeAIEngine::updateActuator(const EdgeAIActuatorReading& reading) {
     }
     zone.actuator = merged;
     zone.actuatorValid = true;
+    zone.actuatorReceivedAtMs = millis();
     if (!wasOpen && reading.valveActual) {
         zone.wateringActive = true;
         zone.wateringPending = false;
@@ -211,6 +263,7 @@ void EdgeAIEngine::updateDryingState(ZoneState& zone, const EdgeAISensorReading&
         sensor.epochMs <= zone.trendAnchorEpochMs) {
         zone.trendAnchorPct = sensor.moisturePct;
         zone.trendAnchorEpochMs = sensor.epochMs;
+        zone.dryingRateValid = false;
         return;
     }
     const uint64_t elapsed = sensor.epochMs - zone.trendAnchorEpochMs;
@@ -273,7 +326,7 @@ float EdgeAIEngine::estimatedEt0() const {
 EdgeAIFault EdgeAIEngine::detectFault(const ZoneState& zone, const EdgeAISensorReading& sensor,
                                       const EdgeAIFieldProfile& field, float& confidence) const {
     confidence = 0.0f;
-    if (sensor.errorFlags != 0 || sensor.moistureRaw == 0 || sensor.moistureRaw >= 4095 ||
+    if ((sensor.errorFlags & SENSOR_MOISTURE_FAULT) != 0 || sensor.moistureRaw < 10 || sensor.moistureRaw > 4000 ||
         !std::isfinite(sensor.moisturePct) || sensor.moisturePct < 0.0f || sensor.moisturePct > 100.0f) {
         confidence = 1.0f;
         return EdgeAIFault::SENSOR_FAULT;
@@ -285,7 +338,10 @@ EdgeAIFault EdgeAIEngine::detectFault(const ZoneState& zone, const EdgeAISensorR
     }
     if (zone.actuatorValid) {
         const auto& actuator = zone.actuator;
-        if (actuator.errorFlags != 0 || (actuator.feedbackValid && actuator.valveCommanded != actuator.valveActual)) {
+        // Missing feedback/hydraulic sensors are capability flags, not proof
+        // of a stuck valve. Only a measured mismatch can establish this fault.
+        if (actuator.feedbackValid && ((actuator.errorFlags & ACTUATOR_FEEDBACK_MISMATCH) != 0 ||
+                                      actuator.valveCommanded != actuator.valveActual)) {
             confidence = 1.0f;
             return EdgeAIFault::STUCK_VALVE;
         }
@@ -295,20 +351,28 @@ EdgeAIFault EdgeAIEngine::detectFault(const ZoneState& zone, const EdgeAISensorR
         }
         if (std::isfinite(actuator.flowLpm)) {
             const float expected = field.emitterFlowLph > 0.0f ? field.emitterFlowLph / 60.0f : 0.0f;
-            if (!actuator.valveActual && actuator.flowLpm > 0.5f) {
+            if (actuator.feedbackValid && !actuator.valveActual && actuator.flowLpm > 0.5f) {
                 confidence = 1.0f;
                 return EdgeAIFault::LEAK;
             }
-            if (actuator.valveActual && expected > 0.2f && actuator.flowLpm < expected * 0.25f) {
+            if (actuator.feedbackValid && actuator.valveActual && expected > 0.2f && actuator.flowLpm < expected * 0.25f) {
                 confidence = 0.98f;
                 return std::isfinite(actuator.pressureBar) && actuator.pressureBar < 0.5f
                     ? EdgeAIFault::EMPTY_TANK : EdgeAIFault::BLOCKED_PIPE;
             }
-            if (actuator.valveActual && expected > 0.2f && actuator.flowLpm > expected * 1.6f) {
+            if (actuator.feedbackValid && actuator.valveActual && expected > 0.2f && actuator.flowLpm > expected * 1.6f) {
                 confidence = 0.98f;
                 return EdgeAIFault::LEAK;
             }
         }
+    }
+
+    // The fault model was trained on complete hydraulic observations. Do not
+    // replace absent sensors with training means and call that a diagnosis.
+    if (!zone.actuatorValid || !zone.actuator.feedbackValid ||
+        !std::isfinite(zone.actuator.flowLpm) || !std::isfinite(zone.actuator.pressureBar) ||
+        !std::isfinite(zone.actuator.tankPct) || !std::isfinite(zone.actuator.pumpCurrentA)) {
+        return EdgeAIFault::NORMAL;
     }
 
     const EdgeAIActuatorReading blank{};
@@ -318,7 +382,8 @@ EdgeAIFault EdgeAIEngine::detectFault(const ZoneState& zone, const EdgeAISensorR
         static_cast<float>(sensor.rssiDbm), actuator.valveCommanded ? 1.0f : 0.0f,
         actuator.valveActual ? 1.0f : 0.0f, actuator.feedbackValid ? 1.0f : 0.0f,
         actuator.flowLpm, actuator.pressureBar, actuator.tankPct, actuator.pumpCurrentA,
-        static_cast<float>(sensor.errorFlags | actuator.errorFlags)
+        static_cast<float>((sensor.errorFlags & SENSOR_MOISTURE_FAULT) |
+                           (actuator.errorFlags & ACTUATOR_FEEDBACK_MISMATCH))
     };
     float logits[EdgeAIModel::FAULT_CLASS_COUNT];
     float maxLogit = -1e30f;
@@ -349,26 +414,76 @@ EdgeAIPrediction EdgeAIEngine::predict(const EdgeAISensorReading& sensor,
     EdgeAIPrediction prediction;
     prediction.sensorId = sensor.sensorId;
     prediction.actuatorId = field.actuatorId;
-    prediction.weather = _forecast;
-    if (sensor.sensorId == 0 || !std::isfinite(sensor.moisturePct)) {
-        strlcpy(prediction.reason, "Prediction unavailable: invalid moisture input", sizeof(prediction.reason));
+    prediction.sensorReceived = sensor.sensorId != 0;
+    prediction.receivedAtMs = millis();
+    prediction.sensorEpochMs = sensor.epochMs;
+    EngineLock lock(_mutex);
+    if (!lock) {
+        strlcpy(prediction.reason, "Recommendation temporarily unavailable: engine busy", sizeof(prediction.reason));
         return prediction;
     }
-
+    if (sensor.sensorId == 0) {
+        strlcpy(prediction.reason, "Waiting for telemetry from a registered soil sensor", sizeof(prediction.reason));
+        return prediction;
+    }
     ZoneState& zone = zoneFor(sensor.sensorId);
+    zone.sensorReceived = true;
     zone.actuatorId = field.actuatorId;
+    if (!inRange(sensor.moisturePct, 0.0f, 100.0f) || sensor.moistureRaw < 10 ||
+        sensor.moistureRaw > 4000 || (sensor.errorFlags & SENSOR_MOISTURE_FAULT)) {
+        prediction.fault = EdgeAIFault::SENSOR_FAULT;
+        prediction.faultConfidence = 1.0f;
+        strlcpy(prediction.reason, "Sensor received, but soil moisture is invalid. Check probe wiring and calibration.", sizeof(prediction.reason));
+        zone.lastPrediction = prediction;
+        return prediction;
+    }
+    if (zone.actuatorValid && static_cast<uint32_t>(millis() - zone.actuatorReceivedAtMs) > SENSOR_STALE_MS)
+        zone.actuatorValid = false;
+    prediction.runtimeConfigured = inRange(field.zoneAreaM2, 0.001f, 10000000.0f) &&
+        inRange(field.emitterFlowLph, 0.001f, 10000000.0f);
+    prediction.weatherAvailable = _weatherValid && _forecast.valid &&
+        static_cast<uint32_t>(millis() - _weatherReceivedAtMs) <= WEATHER_STALE_MS;
+    prediction.weatherReceivedAtMs = _weatherReceivedAtMs;
+    prediction.weather = prediction.weatherAvailable ? _forecast : EdgeAIWeatherForecast{};
+    prediction.feedbackAvailable = zone.actuatorValid && zone.actuator.feedbackValid;
+    prediction.faultChecksLimited = !prediction.feedbackAvailable || !std::isfinite(zone.actuator.flowLpm) ||
+        !std::isfinite(zone.actuator.pressureBar) || !std::isfinite(zone.actuator.tankPct) ||
+        !std::isfinite(zone.actuator.pumpCurrentA);
     updateWateringEffect(zone, sensor);
     updateDryingState(zone, sensor);
+    prediction.dryingRateMeasured = zone.dryingRateValid;
     prediction.wateringEffect = zone.wateringEffect;
     prediction.wateringMoistureIncreasePct = zone.wateringIncreasePct;
 
     const float threshold = clampValue(field.thresholdPct, 5.0f, 95.0f);
+    if (!prediction.weatherAvailable) {
+        // A real moisture reading still answers "is the soil dry?" even while
+        // weather hardware is unavailable. Do not fabricate water/runtime data.
+        prediction.valid = true;
+        prediction.irrigationNeeded = sensor.moisturePct < threshold;
+        prediction.irrigationProbability = NAN;
+        prediction.recommendedWaterMm = NAN;
+        prediction.dryingRatePctDay = zone.dryingRateValid ? zone.dryingRatePctDay : NAN;
+        prediction.fault = detectFault(zone, sensor, field, prediction.faultConfidence);
+        if (prediction.fault != EdgeAIFault::NORMAL) {
+            snprintf(prediction.reason, sizeof(prediction.reason), "Irrigation inhibited: %s detected", faultName(prediction.fault));
+        } else {
+            snprintf(prediction.reason, sizeof(prediction.reason),
+                "Soil moisture %.1f%% is %s the %.1f%% threshold. Check weather sensors and clock sync; water amount and runtime are unavailable.",
+                sensor.moisturePct, prediction.irrigationNeeded ? "below" : "above", threshold);
+        }
+        zone.lastMoisturePct = sensor.moisturePct;
+        zone.lastSensorEpochMs = sensor.epochMs;
+        zone.lastPrediction = prediction;
+        return prediction;
+    }
     const float temp = _weatherValid && std::isfinite(_currentDay.meanTempC) ? _currentDay.meanTempC : 22.0f;
     const float humidity = _weatherValid && std::isfinite(_currentDay.meanHumidityPct) ? _currentDay.meanHumidityPct : 55.0f;
     const float pressure = _weatherValid && std::isfinite(_currentDay.meanPressureHpa) ? _currentDay.meanPressureHpa : 1015.0f;
     const float rain = _weatherValid ? std::max(0.0f, _currentDay.rainMm) : 0.0f;
     const float wind = _weatherValid && std::isfinite(_currentDay.meanWindMs) ? std::max(0.0f, _currentDay.meanWindMs) : 2.0f;
-    const float soilTemp = std::isfinite(sensor.soilTemperatureC) ? sensor.soilTemperatureC : temp;
+    const float soilTemp = !(sensor.errorFlags & SENSOR_TEMPERATURE_FAULT) &&
+        inRange(sensor.soilTemperatureC, -40.0f, 80.0f) ? sensor.soilTemperatureC : temp;
     const float saturation = 0.6108f * std::exp((17.27f * temp) / (temp + 237.3f));
     const float vpd = std::max(0.0f, saturation * (1.0f - humidity / 100.0f));
     const float kc = cropCoefficient(field.crop, field.growthStage);
@@ -398,12 +513,12 @@ EdgeAIPrediction EdgeAIEngine::predict(const EdgeAISensorReading& sensor,
         EdgeAIModel::DRYING_BIAS), -20.0f, 20.0f);
 
     const bool critical = sensor.moisturePct <= threshold - 12.0f;
-    prediction.waitForRain = prediction.irrigationNeeded && !critical && _forecast.valid &&
-        _forecast.rainProbability >= EdgeAIModel::RAIN_THRESHOLD && _forecast.rainMm24h >= 1.5f;
-    prediction.slowDrying = prediction.irrigationNeeded && !critical &&
+    prediction.waitForRain = prediction.irrigationNeeded && !critical && prediction.weather.valid &&
+        prediction.weather.rainProbability >= EdgeAIModel::RAIN_THRESHOLD && prediction.weather.rainMm24h >= 1.5f;
+    prediction.slowDrying = prediction.irrigationNeeded && !critical && zone.dryingRateValid &&
         prediction.dryingRatePctDay > -0.7f && et0 < 4.0f;
 
-    if (field.zoneAreaM2 > 0.0f && field.emitterFlowLph > 0.0f && prediction.recommendedWaterMm > 0.0f) {
+    if (prediction.runtimeConfigured && prediction.recommendedWaterMm > 0.0f) {
         const float total = prediction.recommendedWaterMm * field.zoneAreaM2 * 60.0f / field.emitterFlowLph;
         prediction.totalRuntimeMin = static_cast<uint16_t>(std::ceil(clampValue(total, 0.0f, 720.0f)));
         prediction.cycleRuntimeMin = std::min<uint16_t>(prediction.totalRuntimeMin, MAX_CYCLE_RUNTIME_MIN);
@@ -413,10 +528,8 @@ EdgeAIPrediction EdgeAIEngine::predict(const EdgeAISensorReading& sensor,
     float faultConfidence = 0.0f;
     prediction.fault = detectFault(zone, sensor, field, faultConfidence);
     prediction.faultConfidence = faultConfidence;
-    if (zone.wateringEffect == WateringEffect::NO_RESPONSE && prediction.fault == EdgeAIFault::NORMAL) {
-        prediction.fault = EdgeAIFault::SENSOR_FAULT;
-        prediction.faultConfidence = 0.80f;
-    }
+    // No moisture increase is a useful observation, not enough evidence to
+    // distinguish a failed sensor, missed watering, soil lag or a blocked pipe.
 
     if (!prediction.irrigationNeeded) prediction.waitHours = 24;
     else if (prediction.waitForRain) prediction.waitHours = 24;
@@ -432,7 +545,7 @@ EdgeAIPrediction EdgeAIEngine::predict(const EdgeAISensorReading& sensor,
 
     if (prediction.fault != EdgeAIFault::NORMAL) {
         snprintf(prediction.reason, sizeof(prediction.reason), "Irrigation inhibited: %s detected", faultName(prediction.fault));
-    } else if (field.zoneAreaM2 <= 0.0f || field.emitterFlowLph <= 0.0f) {
+    } else if (!prediction.runtimeConfigured) {
         prediction.irrigationNow = false;
         snprintf(prediction.reason, sizeof(prediction.reason), "Set zone area and emitter flow before automatic runtime control");
     } else if (!prediction.irrigationNeeded) {
@@ -477,42 +590,107 @@ const char* EdgeAIEngine::wateringEffectName(WateringEffect effect) {
     }
 }
 
+EdgeAIWeatherForecast EdgeAIEngine::weatherForecast() const {
+    EngineLock lock(_mutex);
+    if (!lock || !_weatherValid ||
+        static_cast<uint32_t>(millis() - _weatherReceivedAtMs) > WEATHER_STALE_MS) return {};
+    return _forecast;
+}
+
+const char* EdgeAIEngine::readinessName(const EdgeAIPrediction& p) {
+    if (!p.sensorReceived) return "waiting_sensor";
+    if (static_cast<uint32_t>(millis() - p.receivedAtMs) > SENSOR_STALE_MS) return "stale_sensor";
+    if (!p.valid) return "invalid_sensor";
+    if (!p.weatherAvailable || static_cast<uint32_t>(millis() - p.weatherReceivedAtMs) > WEATHER_STALE_MS) return "needs_weather";
+    if (!p.runtimeConfigured) return "needs_field_config";
+    return "ready";
+}
+
 std::string EdgeAIEngine::predictionJson(const EdgeAIPrediction& p) const {
-    char json[1024];
-    const auto number = [](float value) { return std::isfinite(value) ? value : 0.0f; };
-    snprintf(json, sizeof(json),
-        R"({"type":"ai_prediction","model_version":%lu,"shadow_mode":%s,"sensor_id":%u,"actuator_id":%u,"valid":%s,"irrigation_needed":%s,"irrigation_now":%s,"probability":%.4f,"water_mm":%.2f,"runtime_min":%u,"total_runtime_min":%u,"cycles":%u,"wait_hours":%u,"wait_for_rain":%s,"slow_drying":%s,"drying_rate":%.2f,"forecast_temp_c":%.2f,"forecast_rain_mm":%.2f,"rain_probability":%.4f,"forecast_et0_mm":%.2f,"watering_effect":"%s","moisture_increase_pct":%.2f,"fault":"%s","fault_confidence":%.4f,"reason":"%s"})",
+    // Append bounded sections instead of a large snprintf buffer on the LoRa
+    // task stack. Unavailable values are JSON null, never NaN or invented zero.
+    char part[640];
+    const uint32_t ageMs = static_cast<uint32_t>(millis() - p.receivedAtMs);
+    const bool valid = p.valid && p.sensorReceived && ageMs <= SENSOR_STALE_MS;
+    const bool weatherAvailable = p.weatherAvailable &&
+        static_cast<uint32_t>(millis() - p.weatherReceivedAtMs) <= WEATHER_STALE_MS;
+    const bool forecastValid = valid && p.weather.valid && weatherAvailable;
+    const bool runtimeValid = valid && p.runtimeConfigured && weatherAvailable;
+    const char* reason = predictionReason(p);
+    std::string result;
+    result.reserve(1400);
+    snprintf(part, sizeof(part),
+        R"({"type":"ai_prediction","model_version":%lu,"shadow_mode":%s,"sensor_id":%u,"actuator_id":%u,"valid":%s,"readiness":"%s","sensor_epoch_ms":%llu,"sensor_age_s":%lu,"runtime_configured":%s,"weather_available":%s,"feedback_available":%s,"fault_checks_limited":%s,"drying_rate_measured":%s,)",
         static_cast<unsigned long>(EdgeAIModel::MODEL_VERSION), p.shadowMode ? "true" : "false",
-        p.sensorId, p.actuatorId, p.valid ? "true" : "false",
-        p.irrigationNeeded ? "true" : "false", p.irrigationNow ? "true" : "false",
-        number(p.irrigationProbability), number(p.recommendedWaterMm), p.cycleRuntimeMin,
-        p.totalRuntimeMin, p.cycleCount, p.waitHours, p.waitForRain ? "true" : "false",
-        p.slowDrying ? "true" : "false", number(p.dryingRatePctDay),
-        number(p.weather.temperatureC24h), number(p.weather.rainMm24h), number(p.weather.rainProbability),
-        number(p.weather.et0Mm24h), wateringEffectName(p.wateringEffect), number(p.wateringMoistureIncreasePct),
-        faultName(p.fault), number(p.faultConfidence), p.reason);
-    return std::string(json);
+        p.sensorId, p.actuatorId, valid ? "true" : "false", readinessName(p),
+        static_cast<unsigned long long>(p.sensorEpochMs), static_cast<unsigned long>(ageMs / 1000),
+        p.runtimeConfigured ? "true" : "false", weatherAvailable ? "true" : "false",
+        p.feedbackAvailable ? "true" : "false", p.faultChecksLimited ? "true" : "false",
+        p.dryingRateMeasured ? "true" : "false");
+    result += part;
+    snprintf(part, sizeof(part),
+        R"("irrigation_needed":%s,"irrigation_now":%s,"probability":%s,"water_mm":%s,"runtime_min":%s,"total_runtime_min":%s,"cycles":%u,"wait_hours":%u,"wait_for_rain":%s,"slow_drying":%s,"drying_rate":%s,"forecast_valid":%s,"forecast_temp_c":%s,"forecast_rain_mm":%s,"rain_probability":%s,"forecast_et0_mm":%s,)",
+        valid && p.irrigationNeeded ? "true" : "false", runtimeValid && p.irrigationNow ? "true" : "false",
+        jsonNumber(valid ? p.irrigationProbability : NAN, 4).c_str(),
+        jsonNumber(valid && weatherAvailable ? p.recommendedWaterMm : NAN).c_str(),
+        jsonNumber(runtimeValid ? p.cycleRuntimeMin : NAN, 0).c_str(),
+        jsonNumber(runtimeValid ? p.totalRuntimeMin : NAN, 0).c_str(),
+        valid ? p.cycleCount : 0, valid ? p.waitHours : 0,
+        forecastValid && p.waitForRain ? "true" : "false", valid && weatherAvailable && p.slowDrying ? "true" : "false",
+        jsonNumber(valid ? p.dryingRatePctDay : NAN).c_str(), forecastValid ? "true" : "false",
+        jsonNumber(forecastValid ? p.weather.temperatureC24h : NAN).c_str(),
+        jsonNumber(forecastValid ? p.weather.rainMm24h : NAN).c_str(),
+        jsonNumber(forecastValid ? p.weather.rainProbability : NAN, 4).c_str(),
+        jsonNumber(forecastValid ? p.weather.et0Mm24h : NAN).c_str());
+    result += part;
+    snprintf(part, sizeof(part),
+        R"("watering_effect":"%s","moisture_increase_pct":%s,"fault":"%s","fault_confidence":%s,"reason":"%s"})",
+        wateringEffectName(p.wateringEffect), jsonNumber(p.wateringMoistureIncreasePct).c_str(),
+        faultName(p.fault), jsonNumber(p.faultConfidence, 4).c_str(), reason);
+    result += part;
+    return result;
 }
 
 std::string EdgeAIEngine::statusJson() const {
-    char header[512];
-    const auto number = [](float value) { return std::isfinite(value) ? value : 0.0f; };
-    snprintf(header, sizeof(header),
-        R"({"model_name":"%s","model_version":%lu,"shadow_mode":%s,"dataset_sha256":"%s","weather":{"valid":%s,"temperature_c_24h":%.2f,"rain_mm_24h":%.2f,"rain_probability":%.4f,"et0_mm_24h":%.2f},"zones":[)",
+    EngineLock lock(_mutex);
+    if (!lock) return R"({"readiness":"busy","reason":"Recommendation engine is busy. Retry shortly.","weather":{"valid":false},"zones":[]})";
+    unsigned sensorCount = 0, readyCount = 0;
+    const char* readiness = "waiting_sensor";
+    const char* reason = "Waiting for telemetry from a soil sensor. Check sensor power, LoRa registration and radio settings; the sensor reports every two minutes.";
+    for (const auto& zone : _zones) {
+        if (!zone.used || !zone.sensorReceived) continue;
+        ++sensorCount;
+        const char* state = readinessName(zone.lastPrediction);
+        if (strcmp(state, "ready") == 0) ++readyCount;
+        if (sensorCount == 1) { readiness = state; reason = predictionReason(zone.lastPrediction); }
+    }
+    if (readyCount) { readiness = "ready"; reason = "Recommendations are available. Review each zone's data and safety status."; }
+    else if (strcmp(readiness, "stale_sensor") == 0)
+        reason = "Soil sensor telemetry is stale. Check sensor power and the LoRa link.";
+    const bool forecastValid = _forecast.valid &&
+        static_cast<uint32_t>(millis() - _weatherReceivedAtMs) <= WEATHER_STALE_MS;
+    char part[640];
+    snprintf(part, sizeof(part),
+        R"({"model_name":"%s","model_version":%lu,"shadow_mode":%s,"dataset_sha256":"%s","readiness":"%s","sensor_count":%u,"ready_zone_count":%u,"reason":"%s",)",
         EdgeAIModel::MODEL_NAME, static_cast<unsigned long>(EdgeAIModel::MODEL_VERSION),
         controlAllowed() ? "false" : "true", EdgeAIModel::DATASET_SHA256,
-        _forecast.valid ? "true" : "false", number(_forecast.temperatureC24h),
-        number(_forecast.rainMm24h), number(_forecast.rainProbability), number(_forecast.et0Mm24h));
-    std::string result(header);
+        readiness, sensorCount, readyCount, reason);
+    std::string result(part);
+    snprintf(part, sizeof(part),
+        R"("weather":{"valid":%s,"temperature_c_24h":%s,"rain_mm_24h":%s,"rain_probability":%s,"et0_mm_24h":%s},"zones":[)",
+        forecastValid ? "true" : "false", jsonNumber(forecastValid ? _forecast.temperatureC24h : NAN).c_str(),
+        jsonNumber(forecastValid ? _forecast.rainMm24h : NAN).c_str(),
+        jsonNumber(forecastValid ? _forecast.rainProbability : NAN, 4).c_str(),
+        jsonNumber(forecastValid ? _forecast.et0Mm24h : NAN).c_str());
+    result += part;
     bool first = true;
     for (const auto& zone : _zones) {
-        if (!zone.used || !zone.lastPrediction.valid) continue;
+        // Keep invalid sensor observations visible, so "waiting" cannot hide
+        // a received packet with a disconnected or miscalibrated moisture probe.
+        if (!zone.used || !zone.sensorReceived) continue;
         if (!first) result += ',';
         first = false;
-        std::string row = predictionJson(zone.lastPrediction);
-        const size_t typeStart = row.find("\"type\":\"ai_prediction\",");
-        if (typeStart != std::string::npos) row.erase(typeStart, strlen("\"type\":\"ai_prediction\","));
-        result += row;
+        result += predictionJson(zone.lastPrediction);
     }
     result += "]}";
     return result;

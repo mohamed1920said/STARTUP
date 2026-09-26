@@ -1,5 +1,21 @@
 #include "NodeManager.h"
+#include <LoraProtocol.h>
 #include <cstring>
+
+#ifndef PILOT_REQUIRE_MANUAL_REARM
+#define PILOT_REQUIRE_MANUAL_REARM 1
+#endif
+
+static bool keyAllowed(const uint8_t psk[16]) {
+    if (!psk) return false;
+    bool allZero = true;
+    bool allFF = true;
+    for (size_t i = 0; i < 16; ++i) {
+        allZero = allZero && psk[i] == 0;
+        allFF = allFF && psk[i] == 0xFF;
+    }
+    return !allZero && !allFF;
+}
 
 // Escape JSON-special characters in a string (for user-supplied alias)
 static void jsonEscape(const char* src, char* dst, size_t dstSz) {
@@ -24,25 +40,30 @@ NodeManager::NodeManager() : _count(0) {
     for (auto& n : _nodes) n.registered = false;
 }
 
-void NodeManager::begin() { loadNVS(); }
+void NodeManager::begin() { std::lock_guard<std::recursive_mutex> lock(_mutex); loadNVS(); }
 
 bool NodeManager::provision(uint16_t id, uint8_t type,
                              const uint8_t psk[16], const char* alias) {
-    if (!psk || !alias || id == 0 || (type != 0x01 && type != 0x02)) return false;
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    if (!alias || id == 0 || id == 0xFFFF || !keyAllowed(psk) ||
+        (type != 0x01 && type != 0x02)) return false;
+    // Updating an existing ID would reset its replay counters. Operators must
+    // remove it explicitly and use a newly generated PSK for reprovisioning.
+    if (find(id)) return false;
     uint8_t derived[16];
     if (!CryptoEngine::deriveSessionKey(psk, id, derived)) return false;
-    NodeInfo* n = find(id);
-    if (!n) {
-        if (_count >= MAX_NODES) return false;
-        n = &_nodes[_count++];
-    }
+    if (_count >= MAX_NODES) { memset(derived, 0, sizeof(derived)); return false; }
+    NodeInfo* n = &_nodes[_count++];
+    memset(n, 0, sizeof(*n));
     n->id = id;
     n->type = type;
     memcpy(n->psk, psk, 16);
     memcpy(n->sessionKey, derived, sizeof(derived));
     n->registered = true;
     n->lastSeq = 0;
-    n->lastSeen = millis();
+    // Provisioning is not evidence that the physical node is online. OPEN
+    // remains blocked until an authenticated actuator packet arrives.
+    n->lastSeen = 0;
     n->autoMode = false;
     n->threshold = 50;
     n->sensorId = 0;
@@ -51,34 +72,65 @@ bool NodeManager::provision(uint16_t id, uint8_t type,
     n->lastAckSeq = 0;
     n->lastHeartbeatSeq = 0;
     strncpy(n->alias, alias, 23); n->alias[23] = 0;
-    saveNVS(*n);
+    memset(derived, 0, sizeof(derived));
+    if (!saveNVS(*n)) {
+        memset(n, 0, sizeof(*n));
+        --_count;
+        return false;
+    }
     return true;
 }
 
 bool NodeManager::handlePacket(uint16_t nodeId, PacketType type,
                                const uint8_t* pt, size_t len, uint32_t seq) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     NodeInfo* n = find(nodeId);
     if (!n || !n->registered || seq == 0) return false;
     uint32_t* streamLast = nullptr;
     switch (type) {
-        case PacketType::SENSOR_TELEMETRY: streamLast = &n->lastTelemetrySeq; break;
-        case PacketType::ACK:              streamLast = &n->lastAckSeq; break;
-        case PacketType::HEARTBEAT:        streamLast = &n->lastHeartbeatSeq; break;
+        case PacketType::SENSOR_TELEMETRY: {
+            if (n->type != 0x01 || !pt || len != TELEMETRY_WIRE_SIZE) return false;
+            SensorTelemetry telemetry;
+            deserializeTelemetry(pt, telemetry);
+            if (telemetry.sequence != seq) return false;
+            streamLast = &n->lastTelemetrySeq;
+            break;
+        }
+        case PacketType::ACK:
+            if (n->type != 0x02 || !pt || len != ACK_WIRE_SIZE) return false;
+            streamLast = &n->lastAckSeq;
+            break;
+        case PacketType::HEARTBEAT: {
+            if (n->type != 0x02 || !pt || len != HEARTBEAT_WIRE_SIZE) return false;
+            HeartbeatPayload heartbeat;
+            deserializeHeartbeat(pt, heartbeat);
+            if (heartbeat.sequence != seq) return false;
+            streamLast = &n->lastHeartbeatSeq;
+            break;
+        }
         default: return false;
     }
     if (seq <= *streamLast) return false;
+    const NodeInfo previous = *n;
     *streamLast = seq;
     n->lastSeen = millis();
     n->lastSeq = seq;
-    saveNVS(*n);
+    if (!saveNVS(*n)) {
+        *n = previous;
+        return false;
+    }
     return true;
 }
 
 bool NodeManager::remove(uint16_t id) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     nvs_handle_t h;
     if (nvs_open("node_db", NVS_READWRITE, &h) != ESP_OK) return false;
     char key[16]; snprintf(key, sizeof(key), "n_%04X", id);
-    nvs_erase_key(h, key); nvs_commit(h); nvs_close(h);
+    const esp_err_t erased = nvs_erase_key(h, key);
+    const esp_err_t committed = erased == ESP_OK ? nvs_commit(h) : erased;
+    nvs_close(h);
+    if (erased != ESP_OK || committed != ESP_OK) return false;
     for (int i = 0; i < _count; i++) {
         if (_nodes[i].id == id) {
             for (int j = i; j < _count - 1; j++) _nodes[j] = _nodes[j + 1];
@@ -91,20 +143,27 @@ bool NodeManager::remove(uint16_t id) {
 }
 
 bool NodeManager::setActuatorConfig(uint16_t id, bool autoMode, uint8_t threshold, uint16_t sensorId) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     NodeInfo* n = find(id);
     if (!n || !n->registered || n->type != 0x02) return false;
+    if (threshold < 5 || threshold > 95) return false;
     if (autoMode) {
         NodeInfo* sensor = find(sensorId);
         if (!sensor || sensor->type != 0x01) return false;
     }
+    const NodeInfo previous = *n;
     n->autoMode = autoMode;
-    n->threshold = constrain(threshold, 0, 100);
+    n->threshold = threshold;
     n->sensorId = sensorId;
-    saveNVS(*n);
+    if (!saveNVS(*n)) {
+        *n = previous;
+        return false;
+    }
     return true;
 }
 
 void NodeManager::setValveState(uint16_t id, bool open) {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     NodeInfo* n = find(id);
     if (n) n->valveOpen = open;
 }
@@ -115,15 +174,23 @@ NodeInfo* NodeManager::find(uint16_t id) {
     return nullptr;
 }
 
-void NodeManager::saveNVS(const NodeInfo& info) {
+bool NodeManager::saveNVS(const NodeInfo& info) {
     nvs_handle_t h;
-    if (nvs_open("node_db", NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_open("node_db", NVS_READWRITE, &h) != ESP_OK) return false;
     char key[16]; snprintf(key, sizeof(key), "n_%04X", info.id);
-    nvs_set_blob(h, key, &info, sizeof(NodeInfo));
-    nvs_commit(h); nvs_close(h);
+    bool saved = nvs_set_blob(h, key, &info, sizeof(NodeInfo)) == ESP_OK &&
+        nvs_commit(h) == ESP_OK;
+    NodeInfo verify{};
+    size_t verifySize = sizeof(verify);
+    saved = saved && nvs_get_blob(h, key, &verify, &verifySize) == ESP_OK &&
+        verifySize == sizeof(verify) && memcmp(&verify, &info, sizeof(info)) == 0;
+    memset(&verify, 0, sizeof(verify));
+    nvs_close(h);
+    return saved;
 }
 
 std::string NodeManager::toJson() const {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     // Pre-calculate approximate size to avoid reallocation
     size_t approx = 2 + _count * 180 + 1;
     std::string json;
@@ -157,8 +224,31 @@ void NodeManager::loadNVS() {
             size_t sz = sizeof(NodeInfo);
             NodeInfo& ni = _nodes[_count];
             memset(&ni, 0, sizeof(ni));
-            if (nvs_get_blob(h, ei.key, &ni, &sz) == ESP_OK) {
+            if (nvs_get_blob(h, ei.key, &ni, &sz) == ESP_OK && sz == sizeof(NodeInfo)) {
                 ni.alias[sizeof(ni.alias) - 1] = 0;
+                uint8_t derived[16];
+                char expectedKey[16];
+                snprintf(expectedKey, sizeof(expectedKey), "n_%04X", ni.id);
+                const bool validRecord = ni.registered && ni.id != 0 && ni.id != 0xFFFF &&
+                    (ni.type == 0x01 || ni.type == 0x02) && keyAllowed(ni.psk) &&
+                    ni.threshold >= 5 && ni.threshold <= 95 &&
+                    strcmp(ei.key, expectedKey) == 0 &&
+                    find(ni.id) == nullptr &&
+                    CryptoEngine::deriveSessionKey(ni.psk, ni.id, derived) &&
+                    memcmp(derived, ni.sessionKey, sizeof(derived)) == 0;
+                memset(derived, 0, sizeof(derived));
+                if (!validRecord) {
+                    memset(&ni, 0, sizeof(ni));
+                    it = nvs_entry_next(it);
+                    continue;
+                }
+                // Uptime from a previous boot is not evidence of a live node.
+                ni.lastSeen = 0;
+#if PILOT_REQUIRE_MANUAL_REARM
+                // A supervised pilot must explicitly re-arm automation after
+                // every gateway restart and observe fresh node telemetry first.
+                ni.autoMode = false;
+#endif
                 _count++;
             }
         }

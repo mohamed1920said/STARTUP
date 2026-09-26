@@ -9,13 +9,25 @@ constexpr size_t AES128_KEY_SIZE     = 16;
 constexpr size_t AES128_BLOCK_SIZE   = 16;
 constexpr size_t GCM_IV_SIZE         = 12;
 constexpr size_t GCM_TAG_SIZE        = 16;
-constexpr size_t GCM_TAG_TRUNCATED   = 4;
+// Pilot framing uses the complete authentication tag. All three device roles
+// must run the same release because this changes every LoRa frame length.
+constexpr size_t GCM_TAG_TRUNCATED   = GCM_TAG_SIZE;
 constexpr size_t LORA_HEADER_SIZE    = 15;    // 2 node_id + 12 iv + 1 pkt_type
 constexpr size_t MIC_SIZE            = GCM_TAG_TRUNCATED;
 constexpr size_t NODE_ID_SIZE        = 2;
 constexpr size_t IV_NONCE_SIZE       = GCM_IV_SIZE;
 constexpr size_t LORA_MAX_CIPHERTEXT = 64;
 constexpr size_t LORA_MAX_PAYLOAD    = LORA_HEADER_SIZE + LORA_MAX_CIPHERTEXT + MIC_SIZE;
+
+constexpr uint8_t SENSOR_ERROR_MOISTURE    = 0x01;
+constexpr uint8_t SENSOR_ERROR_TEMPERATURE = 0x02;
+
+constexpr uint8_t ACTUATOR_RESULT_VERIFIED          = 0x00;
+constexpr uint8_t ACTUATOR_RESULT_FEEDBACK_MISMATCH = 0x01;
+constexpr uint8_t ACTUATOR_RESULT_UNVERIFIED        = 0x02;
+constexpr uint8_t ACTUATOR_RESULT_INVALID_COMMAND   = 0x03;
+constexpr uint8_t ACTUATOR_RESULT_LOW_BATTERY       = 0x04;
+constexpr uint8_t ACTUATOR_RESULT_STORAGE_ERROR     = 0x05;
 
 using NodeId = uint16_t;
 

@@ -2,6 +2,9 @@
 #include <ESPAsyncWebServer.h>
 #include <functional>
 #include <string>
+#include <mutex>
+#include <atomic>
+#include "TelemetryCache.h"
 
 struct SensorTelemetryData {
     uint16_t node_id;
@@ -44,7 +47,7 @@ struct ActuatorStateData {
     uint64_t epoch_ms;
 };
 
-using ControlCallback = std::function<void(uint16_t node_id, bool on)>;
+using ControlCallback = std::function<bool(uint16_t node_id, bool on)>;
 using ProvisionCallback = std::function<void(uint16_t node_id, const uint8_t psk[16], const char* type, const char* alias)>;
 using RemoveCallback = std::function<void(uint16_t node_id)>;
 using ActuatorCfgCallback = std::function<void(uint16_t node_id, bool autoMode, uint8_t threshold, uint16_t sensorId)>;
@@ -53,6 +56,7 @@ using CloudCfgProvider = std::function<std::string()>;
 using CloudCfgUpdateCallback = std::function<void(const char* url, const char* apiKey, const char* caCert)>;
 using DatasetStatusProvider = std::function<std::string()>;
 using AIStatusProvider = std::function<std::string()>;
+using HealthProvider = std::function<std::string()>;
 using DatasetLabelCallback = std::function<bool(const char* label, const char* notes)>;
 using DatasetClearCallback = std::function<bool()>;
 using FieldCfgProvider = std::function<std::string()>;
@@ -81,6 +85,8 @@ public:
     void setDatasetArchivePath(const char* path) { _datasetArchivePath = path ? path : ""; }
     void setDatasetStatusProvider(DatasetStatusProvider cb) { _datasetStatusProvider = cb; }
     void setAIStatusProvider(AIStatusProvider cb) { _aiStatusProvider = cb; }
+    void setHealthProvider(HealthProvider cb) { _healthProvider = cb; }
+    void forgetNode(uint16_t nodeId);
     void onDatasetLabel(DatasetLabelCallback cb) { _datasetLabel_cb = cb; }
     void onDatasetClear(DatasetClearCallback cb) { _datasetClear_cb = cb; }
     void setFieldCfgProvider(FieldCfgProvider cb) { _fieldCfgProvider = cb; }
@@ -103,6 +109,14 @@ private:
     CloudCfgUpdateCallback _cloudCfgUpdate_cb;
     DatasetStatusProvider _datasetStatusProvider;
     AIStatusProvider _aiStatusProvider;
+    HealthProvider _healthProvider;
+    std::mutex _telemetryMutex;
+    TelemetryCache<SensorTelemetryData, 16> _sensors;
+    TelemetryCache<ActuatorStateData, 16> _actuators;
+    WeatherTelemetryData _weather{};
+    bool _hasWeather = false;
+    uint32_t _lastCleanupMs = 0;
+    std::atomic<uint32_t> _wsDropped{0};
     DatasetLabelCallback _datasetLabel_cb;
     DatasetClearCallback _datasetClear_cb;
     FieldCfgProvider _fieldCfgProvider;
@@ -116,4 +130,6 @@ private:
     void registerOtaHandler();
     bool initLittleFS();
     bool authorize(AsyncWebServerRequest* request) const;
+    std::string telemetryJson();
+    void broadcast(const char* json);
 };

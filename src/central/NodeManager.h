@@ -3,6 +3,7 @@
 #include <nvs_flash.h>
 #include <nvs.h>
 #include <LoraNetwork.h>
+#include <mutex>
 
 struct NodeInfo {
     uint16_t id;
@@ -32,20 +33,30 @@ public:
     void setValveState(uint16_t id, bool open);
     bool handlePacket(uint16_t nodeId, PacketType type,
                       const uint8_t* plaintext, size_t len, uint32_t seq);
-    int count() const { return _count; }
-    const NodeInfo* getNode(int i) const { return (i < _count) ? &_nodes[i] : nullptr; }
-    const uint8_t* getPsk(uint16_t id) const {
+    int count() const { std::lock_guard<std::recursive_mutex> lock(_mutex); return _count; }
+    bool copyNode(int i, NodeInfo& out) const {
+        std::lock_guard<std::recursive_mutex> lock(_mutex);
+        if (i < 0 || i >= _count) return false;
+        out = _nodes[i];
+        return true;
+    }
+    bool copyPsk(uint16_t id, uint8_t out[16]) const {
+        std::lock_guard<std::recursive_mutex> lock(_mutex);
         for (int i = 0; i < _count; i++)
-            if (_nodes[i].registered && _nodes[i].id == id) return _nodes[i].psk;
-        return nullptr;
+            if (_nodes[i].registered && _nodes[i].id == id) {
+                memcpy(out, _nodes[i].psk, 16);
+                return true;
+            }
+        return false;
     }
     std::string toJson() const;
     static constexpr int MAX_NODES = 16;
 
 private:
+    mutable std::recursive_mutex _mutex;
     NodeInfo _nodes[MAX_NODES];
     int _count;
     NodeInfo* find(uint16_t id);
-    void saveNVS(const NodeInfo& n);
+    bool saveNVS(const NodeInfo& n);
     void loadNVS();
 };

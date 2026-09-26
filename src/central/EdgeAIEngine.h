@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include <string>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #ifndef EDGE_AI_ALLOW_CONTROL
 #define EDGE_AI_ALLOW_CONTROL 0
@@ -81,6 +83,15 @@ struct EdgeAIWeatherForecast {
 
 struct EdgeAIPrediction {
     bool valid = false;
+    bool sensorReceived = false;
+    uint32_t receivedAtMs = 0;
+    uint64_t sensorEpochMs = 0;
+    bool runtimeConfigured = false;
+    bool weatherAvailable = false;
+    uint32_t weatherReceivedAtMs = 0;
+    bool dryingRateMeasured = false;
+    bool feedbackAvailable = false;
+    bool faultChecksLimited = true;
     uint16_t sensorId = 0;
     uint16_t actuatorId = 0;
     bool irrigationNeeded = false;
@@ -107,6 +118,9 @@ class EdgeAIEngine {
 public:
     static constexpr uint8_t MAX_ZONES = 16;
     static constexpr uint16_t MAX_CYCLE_RUNTIME_MIN = 30;
+    // Sensor firmware sends every two minutes; five missed reports are stale.
+    static constexpr uint32_t SENSOR_STALE_MS = 10UL * 60UL * 1000UL;
+    static constexpr uint32_t WEATHER_STALE_MS = 5UL * 60UL * 1000UL;
 
     void begin();
     void updateWeather(const EdgeAIWeatherReading& reading);
@@ -114,10 +128,11 @@ public:
     EdgeAIPrediction predict(const EdgeAISensorReading& sensor,
                              const EdgeAIFieldProfile& field);
 
-    EdgeAIWeatherForecast weatherForecast() const { return _forecast; }
+    EdgeAIWeatherForecast weatherForecast() const;
     bool controlAllowed() const { return EDGE_AI_ALLOW_CONTROL != 0; }
     std::string predictionJson(const EdgeAIPrediction& prediction) const;
     std::string statusJson() const;
+    static const char* readinessName(const EdgeAIPrediction& prediction);
 
     static const char* faultName(EdgeAIFault fault);
     static const char* wateringEffectName(WateringEffect effect);
@@ -125,6 +140,7 @@ public:
 private:
     struct ZoneState {
         bool used = false;
+        bool sensorReceived = false;
         uint16_t sensorId = 0;
         uint16_t actuatorId = 0;
         float lastMoisturePct = NAN;
@@ -135,6 +151,7 @@ private:
         bool dryingRateValid = false;
         EdgeAIActuatorReading actuator;
         bool actuatorValid = false;
+        uint32_t actuatorReceivedAtMs = 0;
         bool wateringActive = false;
         bool wateringPending = false;
         float preWaterMoisturePct = NAN;
@@ -158,9 +175,12 @@ private:
     ZoneState _zones[MAX_ZONES]{};
     EdgeAIWeatherReading _latestWeather;
     bool _weatherValid = false;
+    uint32_t _weatherReceivedAtMs = 0;
     DailyWeather _currentDay;
     DailyWeather _weatherHistory[3]{};
     EdgeAIWeatherForecast _forecast;
+    // Sensor RX, weather polling and HTTP status run on different RTOS tasks.
+    mutable SemaphoreHandle_t _mutex = nullptr;
 
     ZoneState& zoneFor(uint16_t sensorId);
     const ZoneState* findZone(uint16_t sensorId) const;

@@ -1,0 +1,7 @@
+{
+  "name": "DeviceIdentity",
+  "version": "1.0.0",
+  "description": "Fail-closed NVS identity and physical-serial provisioning for AMR field nodes",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

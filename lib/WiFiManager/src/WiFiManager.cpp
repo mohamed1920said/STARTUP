@@ -7,12 +7,14 @@
 const char* WiFiManager::AP_SSID_PREFIX = "STARTUP-Gateway-";
 const char* WiFiManager::NVS_NAMESPACE  = "wifi_cfg";
 
-WiFiManager::WiFiManager() {
-    setResetPin(RESET_PIN_DEFAULT, true, RESET_HOLD_MS_DEFAULT);
-}
+WiFiManager::WiFiManager() {}
 
 void WiFiManager::begin(AsyncWebServer& server) {
     _server = &server;
+    // Global constructors run before Arduino has initialized GPIO and Serial.
+    if (!_resetPinConfigured) setResetPin(RESET_PIN_DEFAULT, true, RESET_HOLD_MS_DEFAULT);
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(true);
     _prefs.begin(NVS_NAMESPACE, false);
     ensureAdminCredentials();
 
@@ -59,6 +61,7 @@ bool WiFiManager::waitForConnection(unsigned long timeoutMs) {
         delay(100);
     }
     if (WiFi.status() == WL_CONNECTED) {
+        _wasConnected = true;
         Serial.printf("[WM] Connected @ %s\n", WiFi.localIP().toString().c_str());
         return true;
     }
@@ -115,16 +118,40 @@ void WiFiManager::loop() {
         _dns.processNextRequest();
         if (_pendingConnect) {
             _pendingConnect = false;
-            _connecting = true;
             connectToSaved();
+        }
+        if (_connecting) {
+            if (WiFi.status() == WL_CONNECTED) {
+                _configIP = WiFi.localIP();
+                _configDone = true;
+                _connecting = false;
+                Serial.printf("[WM] Setup connected @ %s\n", _configIP.toString().c_str());
+            } else if (millis() - _connectStartedAt >= 15000UL) {
+                _connecting = false;
+                Serial.println(F("[WM] Setup connection failed; check network and password"));
+            }
         }
         if (_configDone) {
             static unsigned long restartAt = 0;
             if (restartAt == 0) restartAt = millis() + 30000;
-            if (millis() >= restartAt) {
+            if (static_cast<int32_t>(millis() - restartAt) >= 0) {
                 _prefs.end();
                 ESP.restart();
             }
+        }
+    } else {
+        const bool connected = WiFi.status() == WL_CONNECTED;
+        if (connected && !_wasConnected) {
+            Serial.printf("[WM] WiFi restored @ %s\n", WiFi.localIP().toString().c_str());
+        } else if (!connected && _wasConnected) {
+            _lastReconnectAttempt = millis();
+            Serial.println(F("[WM] WiFi disconnected; local radio and logging continue"));
+        }
+        _wasConnected = connected;
+        if (!connected && millis() - _lastReconnectAttempt >= 30000UL) {
+            _lastReconnectAttempt = millis();
+            Serial.println(F("[WM] Retrying saved WiFi network"));
+            WiFi.reconnect();
         }
     }
 }
@@ -227,9 +254,12 @@ void WiFiManager::startAP() {
     String apSsid = generateAPSSID();
     WiFi.mode(WIFI_AP);
     WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
-    WiFi.softAP(apSsid.c_str(), nullptr, 1, 0, 1);
-    Serial.printf("[WM] Open AP started: %s @ 192.168.4.1 (no password)\n",
-                  apSsid.c_str());
+    if (!WiFi.softAP(apSsid.c_str(), _adminPass, 1, 0, 1)) {
+        Serial.println(F("[WM] ERROR: secure commissioning AP failed to start"));
+        return;
+    }
+    Serial.printf("[WM] Secure commissioning AP: %s @ 192.168.4.1\n", apSsid.c_str());
+    Serial.printf("[WM] Commissioning AP password (physical serial only): %s\n", _adminPass);
 
     _dns.start(53, "*", IPAddress(192, 168, 4, 1));
 
@@ -253,21 +283,9 @@ bool WiFiManager::connectToSaved() {
         Serial.printf("(static IP %s) ", ip.toString().c_str());
     }
     WiFi.begin(ssid, pass);
-
-    for (int i = 0; i < 30; i++) {
-        if (WiFi.status() == WL_CONNECTED) {
-            _configIP = WiFi.localIP();
-            _configDone = true;
-            _connecting = false;
-            Serial.printf("OK @ %s\n", _configIP.toString().c_str());
-            return true;
-        }
-        delay(500);
-        _dns.processNextRequest();
-    }
-    _connecting = false;
-    Serial.println(F("FAIL"));
-    return false;
+    _connectStartedAt = millis();
+    _connecting = true;
+    return true;
 }
 
 void WiFiManager::tryConnect(const char* ssid, const char* pass, bool useStatic,

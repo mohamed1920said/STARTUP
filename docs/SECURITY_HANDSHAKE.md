@@ -1,98 +1,108 @@
-# Security — PSK Provisioning & AES-128-GCM Encryption
+# Security: physical provisioning and AES-128-GCM
 
-## Overview
+## Provisioning model
 
-Nodes are provisioned with a 16-byte Pre-Shared Key (PSK) via the
-gateway's WebDashboard. All LoRa packets are encrypted and authenticated
-with **AES-128-GCM** using mbedtls. There is no over-the-air registration
-handshake — PSK is assigned out-of-band and stored in NVS.
+There is no over-the-air registration handshake. Each sensor or actuator receives a
+role-bound identity over its physical USB serial connection. The gateway receives a
+matching record through its authenticated dashboard.
 
-## Provisioning Flow
-
-```
-Admin                           Gateway
-  │                                │
-  ├─ Open dashboard http://<ip>    │
-  ├─ Fill provision form:          │
-  │   Node ID: 0x0001              │
-  │   PSK: 32 hex characters       │
-  │   Type: Sensor                 │
-  │   Alias: Garden Soil           │
-  ├─ WebSocket action:"add_node" ──►│
-  │                                ├─ NodeManager::provision()
-  │                                ├─ nvs_set_blob("node_psk", ...)
-  │                                ├─ nvs_set_u16("node_id", ...)
-  │                                └─ Respond: success/fail
+```text
+Physical USB console                    Gateway dashboard
+--------------------                    -----------------
+Generate a unique 16-byte PSK
+PROVISION 0001 <32 hex>                 Add node 0x0001
+Node stores role + ID + raw PSK         Select matching type
+in dev_ident NVS                        Enter the same raw PSK
+Radio starts only after validation      Gateway stores node in node_db NVS
 ```
 
-## Per-Packet Encryption
+Use `STATUS` to inspect role, state, ID, and chip identity. The PSK is never printed.
+`0000`, `FFFF`, an all-zero key, and an all-`FF` key are rejected.
 
-### Parameters
-
-| Parameter      | Value                          |
-|----------------|--------------------------------|
-| Algorithm      | AES-128-GCM                    |
-| Key            | 16-byte PSK (per node)         |
-| Nonce/IV       | 12 bytes                       |
-| AAD            | Node_ID (2) + Type (1) + Seq (4) = 7 bytes |
-| Tag (MIC)      | 4 bytes (truncated)            |
-| Implementation | mbedtls_gcm_*                  |
-
-### Nonce Structure
-
-```
-[packet_type | 0x00 | node_id_hi, node_id_lo | sequence (64-bit field)]
-    1 byte     1 byte          2 bytes                 8 bytes
+```text
+STATUS
+PROVISION 0001 <32-hex-PSK>
+UNPROVISION 0001 CONFIRM
+ERASE CORRUPT CONFIRM
 ```
 
-Packet type separates ACK, heartbeat, telemetry, and command nonce spaces.
-Each transmitter reserves persistent sequence ranges in NVS so a reboot skips
-unused values rather than reusing a nonce. A packet stream must stop and be
-re-keyed before its 32-bit counter is exhausted.
+`PROVISION` only works when the identity is empty. `UNPROVISION` requires the
+current ID and explicit confirmation. The final command is accepted only for a
+corrupt or role-mismatched record. Identity records include a CRC to detect storage
+corruption; the CRC is not a secret or an at-rest encryption mechanism.
 
-### Encryption (Sensor)
+The gateway refuses duplicate node IDs rather than overwriting a PSK and resetting
+replay counters. Reprovisioning requires explicit removal at the gateway,
+`UNPROVISION` over the physical node console, and a newly generated PSK. A newly
+registered node has no freshness credit; the gateway blocks OPEN until it accepts a
+fresh authenticated packet from the physical actuator.
 
-```cpp
-LoraCrypto crypto;
-crypto.setKey(psk, 16);
-crypto.encrypt(plaintext, len, pkt_type, seq_counter, node_id, iv, mic);
-// plaintext now contains ciphertext; iv and truncated mic are populated
+The node and gateway store the raw per-node PSK in NVS. Restrict physical access,
+disable debug access for any later production design, and never include PSKs in
+logs, tickets, screenshots, or source control.
+
+## Per-packet authenticated encryption
+
+| Parameter | Value |
+|---|---|
+| Algorithm | AES-128-GCM using mbedTLS |
+| Key | Unique 16-byte PSK per field node |
+| Nonce/IV | 12 bytes |
+| AAD | node ID (2) + packet type (1) + sequence (4) |
+| Authentication tag | Full 16 bytes |
+
+The transmitted nonce is:
+
+```text
+[packet_type | 0x00 | node_id_hi | node_id_lo | sequence in 8-byte field]
 ```
 
-### Decryption (Gateway)
+The current counter is 32 bits and occupies the low bytes of the nonce's sequence
+field. Packet type separates telemetry, command, ACK, and heartbeat nonce spaces.
+Node ID and type are also authenticated as AAD with the sequence.
 
-```cpp
-const uint8_t* psk = nodeMgr.getPsk(nodeId);
-if (!psk) { /* unknown node */ return; }
-LoraCrypto crypto;
-crypto.setKey(psk, 16);
-crypto.decrypt(ciphertext, len, pkt_type, seq, nodeId, iv, mic);
-```
+Do not mix this release with older firmware that transmitted a 4-byte tag. All
+gateway, sensor, and actuator firmware must be updated together.
 
-## Authentication-tag implementation detail
+## Replay and nonce rules
 
-The gateway's `CryptoEngine::decrypt()` originally passed `GCM_TAG_SIZE` (16)
-as the `tag_len` parameter to `mbedtls_gcm_auth_decrypt`, but only 4 bytes
-(the truncated MIC) are stored and transmitted. This caused mbedtls to
-compare the full 16-byte expected tag against 4 real bytes + 12 zero bytes,
-making authentication always fail.
+- Each transmitter reserves sequence ranges in `lora_seq` before using them.
+- Gateway replay state is independent for telemetry, heartbeat, and ACK streams.
+- The actuator persists the last accepted command sequence.
+- Packets at or below the stored sequence for that stream are dropped.
+- A stream must stop and receive a new PSK before the 32-bit counter is exhausted.
 
-**Fix:** Use `GCM_TAG_TRUNCATED` (4) as `tag_len`.
+NVS writes are not assumed successful. Sequence-block reservations and replay
+checkpoints are read back before use. A reservation failure suppresses that
+transmission; an actuator replay-load failure keeps radio disabled; a replay-save
+failure rejects the command before movement; and a gateway replay-save failure
+rolls state back and rejects the packet.
 
-## Replay Protection
+Identity removal deliberately does not erase `lora_seq`. Do not restore an old NVS
+backup, clone NVS to another board, or clear sequence state while retaining a PSK.
+After a full flash erase, NVS replacement, or uncertain sequence history, generate
+a fresh PSK and update both node and gateway.
 
-- Sensor, actuator, and gateway reserve monotonic sequence ranges in NVS.
-- Gateway tracks telemetry, heartbeat, and ACK sequences independently per node.
-- Packets with `seq ≤ last_seq` for that node and packet stream are dropped.
-- Actuator persists the last accepted command sequence and drops older commands after reboot.
-- Counter wraps after ~4 billion packets (negligible risk at 5s interval).
+## Cloud and local access
 
-## Security Properties
+The optional cloud client accepts only an `https://` base URL and requires both an
+API key and a PEM CA certificate. It sends the key in `X-API-Key` and validates the
+server certificate against the supplied CA. The supervised pilot rejects cloud
+`VALVE_ON` with a negative ACK and permits only remote `VALVE_OFF`. Cloud idempotency
+uses command ID together with node ID and requested state. Identifiers are validated
+before narrowing: `command_id` must be an integer from 1 through `UINT32_MAX`, and
+`node_id` must be an integer from 1 through 65534. Negative, zero, non-integer, and
+out-of-range values are rejected instead of wrapping to a different identifier. Only
+an exact completed tuple returns a cached ACK; a delayed completion with a different
+node/state is ignored, and a fast ACK cannot downgrade a completed tuple to pending.
+Other pre-radio rejections also produce negative ACKs. This cache is bounded and
+volatile, so the server must issue unique command IDs and retain outcomes.
 
-| Property           | Mechanism                                      |
-|--------------------|------------------------------------------------|
-| Node Identity      | Node_ID (2 bytes) — unique per device          |
-| Pre-Shared Secret  | PSK (16 bytes) — never transmitted OTA         |
-| Per-Packet Auth    | AES-128-GCM with 4-byte truncated MIC          |
-| Replay Protection  | Monotonic 32-bit sequence counter              |
-| Key-agility        | Each node has independent PSK                  |
+The commissioning AP uses WPA2 and a generated password printed on physical serial.
+The farm-network dashboard uses HTTP Basic authentication. Place it on an isolated
+pilot network. Browser OTA and local MQTT are disabled by default in the supervised
+pilot build.
+
+These controls provide packet confidentiality/integrity, replay rejection, and
+basic local/cloud access control. They do not provide signed firmware, secure boot,
+flash encryption, hardware key storage, or proof that a physical valve moved.

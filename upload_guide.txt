@@ -2,6 +2,8 @@ AMR FIRMWARE UPLOAD GUIDE
 =========================
 
 Install PlatformIO, connect the target board by USB, and identify its COM port.
+The tested build pins Espressif32 platform 7.0.1 and exact library versions in
+platformio.ini. Do not replace them with floating/latest constraints for the pilot.
 
 1. ESP32-S3 CENTRAL GATEWAY
 ----------------------------
@@ -26,14 +28,35 @@ release, both commands are mandatory; do not upload only the filesystem.
   pio run -e sensor_node -t upload --upload-port COM_PORT
   pio device monitor --port COM_PORT --baud 115200
 
+Provision over the physical serial monitor (replace the example ID and PSK):
+  STATUS
+  PROVISION 0001 <32_HEX_SENSOR_PSK>
+
 3. ACTUATOR NODE
 ----------------
   pio run -e actuator_node -t upload --upload-port COM_PORT
   pio device monitor --port COM_PORT --baud 115200
 
+Provision over the physical serial monitor using a different ID and PSK:
+  STATUS
+  PROVISION 0002 <32_HEX_ACTUATOR_PSK>
+
 IMPORTANT
 ---------
-- Flash matching releases to the gateway, sensor and actuator.
-- The gateway commissioning AP is open and requires no Wi-Fi password.
+- Flash matching releases to the gateway, sensor and actuator. This release uses
+  a full 16-byte radio authentication tag and is incompatible with the old 4-byte tag.
+- The gateway commissioning AP is WPA2 protected. Read its generated password
+  from the gateway's physical 115200-baud serial console.
 - Create the dashboard administrator password on the setup page.
+- Add the exact same node ID, type and unique PSK to the gateway dashboard.
+- The gateway refuses duplicate node IDs. Remove the old gateway record and
+  unprovision the physical node before reprovisioning, then generate a new PSK.
+- Wait for a fresh authenticated node packet after gateway provisioning before
+  testing commands; registration alone never marks a node online.
+- Generate a new PSK after any full node NVS erase. Do not reuse a PSK after
+  sequence state was cleared, and do not clone NVS between devices.
+- Check serial logs after first boot. A replay/sequence NVS readback failure keeps
+  the actuator radio disabled or rejects traffic; do not pilot a node reporting it.
+- Browser OTA is disabled in the supervised pilot; update by physical USB.
 - Never publish node PSKs, administrator passwords or cloud API keys.
+- See docs/PILOT_DEPLOYMENT.md before connecting a valve to water.
